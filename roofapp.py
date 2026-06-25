@@ -174,18 +174,4 @@ with left_panel:
             starter_bundles = math.ceil(eaves / 100) if eaves > 0 else 0
             field_nail_boxes = math.ceil(sq_count / 20) if sq_count > 0 else 0
             eave_nail_boxes  = math.ceil(sq_count / 20) if sq_count > 0 else 0
-            cap_nail_boxes   = math.ceil(sq_count / 20) if sq_count > 0 else 0
-
-# 🖼️ RIGHT PANEL: SINGLE CONTINUOUS VERTICAL SCROLL CANVAS
-with right_panel:
-    st.subheader("🖼️ Document Reference Panel")
-    
-    view_toggle = st.radio(
-        "Display View Mode",
-        options=["1. Roofr Measurement Blueprint", "2. Active Supplier Estimate"],
-        horizontal=True
-    )
-    
-    st.markdown("---")
-    
-    scroll
+            cap_nail_boxes   = math.ceil(sq_count / 20) if sq
