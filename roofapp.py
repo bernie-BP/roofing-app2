@@ -1,15 +1,24 @@
 import streamlit as st
 import math
 import os
+import re
+
+# Safely import pypdf for local/production server use
+try:
+    import pypdf
+    PYPDF_AVAILABLE = True
+    # Clean up the system message cache if initialized inside a dynamic context
+except ImportError:
+    PYPDF_AVAILABLE = False
 
 st.set_page_config(page_title="Roofing Material Calculator", page_icon="🏠", layout="centered")
 
 # Helper function to convert empty text strings safely to floats
 def get_num(val):
-    if not val or val.strip() == "":
+    if not val or str(val).strip() == "":
         return 0.0
     try:
-        return float(val.strip())
+        return float(str(val).strip().replace(',', ''))
     except ValueError:
         return 0.0
 
@@ -18,9 +27,56 @@ if os.path.exists("logo.png"):
     st.image("logo.png", width=200)
 
 st.title("Roofing Material Ordering Dashboard")
-st.write("Enter the job measurements below to automatically calculate required materials.")
+st.write("Enter measurements manually or drop a Roofr report below to instantly generate distributor manifests.")
 
-# ── Material Type ──────────────────────────────────────────────────────────────
+# ==========================================
+# 📋 ROOFR PDF PARSER ENGINE
+# ==========================================
+scanned_vals = {"sq": "", "eaves": "", "valleys": "", "hips": "", "ridges": "", "rakes": ""}
+
+st.header("📋 Automated Roofr Report Import")
+if not PYPDF_AVAILABLE:
+    st.info("💡 *PDF Reader Mode is available when deployed live with a requirements file. Standard manual input is active below.*")
+else:
+    uploaded_file = st.file_uploader("Upload a Roofr PDF Measurement Report", type=["pdf"])
+    
+    if uploaded_file is not None:
+        try:
+            reader = pypdf.PdfReader(uploaded_file)
+            full_text = ""
+            for page in reader.pages:
+                text_content = page.extract_text()
+                if text_content:
+                    full_text += text_content + "\n"
+            
+            # Simple text pattern extractors based on standard Roofr metrics structures
+            def parse_metric(pattern, text):
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    return match.group(1).strip()
+                return ""
+
+            # Target common text architectures used in standard Roofr measurement outlines
+            scanned_vals["sq"] = parse_metric(r"(?:Total Area|Squares)\s*[:\-]?\s*([\d\.,]+)\s*sq", full_text)
+            scanned_vals["eaves"] = parse_metric(r"Eaves\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
+            scanned_vals["valleys"] = parse_metric(r"Valleys\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
+            scanned_vals["hips"] = parse_metric(r"Hips\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
+            scanned_vals["ridges"] = parse_metric(r"Ridges?\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
+            scanned_vals["rakes"] = parse_metric(r"Rakes\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
+            
+            # Alternate parsing rule for plain square values if standard label drops
+            if not scanned_vals["sq"]:
+                sq_match = re.search(r"([\d\.,]+)\s*SQ", full_text)
+                if sq_match:
+                    scanned_vals["sq"] = sq_match.group(1)
+
+            st.success("✅ Roofr measurements scanned! Verify values in the tables below.")
+        except Exception as e:
+            st.error(f"Could not read PDF structure. Please check the file format. Error: {e}")
+
+st.markdown("---")
+
+# ── Material Type Selector ──────────────────────────────────────────────────
 st.header("1. Job Measurements & Specifications")
 
 material_type = st.radio(
@@ -40,15 +96,15 @@ if material_type == "Tile":
 st.markdown("---")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MOD BIT — separate input layout
+# MOD BIT SECTION
 # ══════════════════════════════════════════════════════════════════════════════
 if material_type == "Mod Bit":
     mb_col1, mb_col2 = st.columns(2)
 
     with mb_col1:
-        mod_sq = get_num(st.text_input("Square Count (SQ)", value="", help="1 SQ = 100 sq ft"))
-        mod_eaves = get_num(st.text_input("Eaves (Linear Feet)", value=""))
-        mod_rakes = get_num(st.text_input("Rakes (Linear Feet)", value=""))
+        mod_sq = get_num(st.text_input("Square Count (SQ)", value=scanned_vals["sq"], help="1 SQ = 100 sq ft"))
+        mod_eaves = get_num(st.text_input("Eaves (Linear Feet)", value=scanned_vals["eaves"]))
+        mod_rakes = get_num(st.text_input("Rakes (Linear Feet)", value=scanned_vals["rakes"]))
 
     with mb_col2:
         CAPSHEET_COLORS = [
@@ -66,7 +122,7 @@ if material_type == "Mod Bit":
 
     st.markdown("---")
 
-    # ── Mod Bit Calculations ────────────────────────────────────────────────
+    # Mod Bit Math Calculations
     drip_edge_length = 10
     mb_drip_pieces  = (math.ceil(mod_eaves / drip_edge_length) if mod_eaves > 0 else 0) + 2
     cap_rolls       = math.ceil(mod_sq) if mod_sq > 0 else 0
@@ -80,7 +136,6 @@ if material_type == "Mod Bit":
         base_description = 'Polyglass SAV 9" Self-Adhered (66 LF/roll)'
         base_quantity_str = f"{base_rolls} Rolls  ({mod_eaves + mod_rakes:.0f} LF @ 66 LF/roll)"
 
-    # ── Mod Bit Results ─────────────────────────────────────────────────────
     st.header("2. Calculated Material Order")
 
     if mod_sq > 0 or (mod_eaves + mod_rakes) > 0:
@@ -90,7 +145,6 @@ if material_type == "Mod Bit":
         c3.metric("Drip Edge Pieces", f"{mb_drip_pieces} Pcs", help="10ft sections, eaves only")
 
         st.markdown("### 📋 Detailed Order Manifest")
-
         descriptions = [
             f"Polyglass Cap Sheet — {cap_color}",
             base_description,
@@ -101,21 +155,15 @@ if material_type == "Mod Bit":
             base_quantity_str,
             f"{mb_drip_pieces} Pieces  ({mb_drip_pieces * 10} LF)",
         ]
-
         st.table({"Material Description": descriptions, "Calculated Quantity": quantities})
 
-        # ── Actions ────────────────────────────────────────────────────────
         st.header("3. Actions")
         job_address = st.text_input("Job Address / Name", placeholder="e.g., Lot 42 - Whispering Pines")
-        crew_notes = st.text_area(
-            "Crew / Field Notes",
-            placeholder="e.g., flat deck, drain locations, existing cover count...",
-            height=100,
-        )
+        crew_notes = st.text_area("Crew / Field Notes", placeholder="e.g., flat deck, drain locations...", height=100)
 
         if st.button("Confirm & Ready to Order"):
             if job_address:
-                st.success(f"📦 Order Manifest generated for **{job_address}**! Copy the table above to send to your distributor.")
+                st.success(f"📦 Order Manifest generated for **{job_address}**!")
                 if crew_notes.strip():
                     st.info(f"📝 **Field Notes:** {crew_notes.strip()}")
             else:
@@ -124,27 +172,23 @@ if material_type == "Mod Bit":
         st.info("💡 Enter a Square Count or linear footage above to generate the material order manifest.")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TILE & SHINGLES — Layout
+# TILE & SHINGLES SECTIONS
 # ══════════════════════════════════════════════════════════════════════════════
 else:
     col1, col2 = st.columns(2)
 
     with col1:
-        sq_count = get_num(st.text_input("Square Count (SQ)", value="", help="1 SQ = 100 sq ft"))
+        sq_count = get_num(st.text_input("Square Count (SQ)", value=scanned_vals["sq"], help="1 SQ = 100 sq ft"))
 
         if material_type == "Tile":
             product = st.selectbox("Tile Type / Profile", [
-                "Eagle (S-Profile)",
-                "Eagle (W-Profile)",
-                "Eagle (Flat)",
-                "Westlake (S-Profile)",
-                "Westlake (W-Profile)",
-                "Westlake (Flat)"
+                "Eagle (S-Profile)", "Eagle (W-Profile)", "Eagle (Flat)",
+                "Westlake (S-Profile)", "Westlake (W-Profile)", "Westlake (Flat)"
             ])
         else:
             GAF_SHINGLES = {
-                "GAF Royal Sovereign (3-Tab)":                          3,
                 "GAF Timberline HDZ (Architectural)":                   3,
+                "GAF Royal Sovereign (3-Tab)":                          3,
                 "GAF Timberline UHDZ (Ultra High Definition)":          3,
                 "GAF Timberline CS Cool Series (Architectural)":        3,
                 "GAF Timberline American Harvest (Architectural)":      3,
@@ -163,21 +207,20 @@ else:
             bundles_per_sq = GAF_SHINGLES[product]
             st.caption(f"Coverage rate: **{bundles_per_sq} bundles per square**")
 
-        # 1. Eaves & 2. Valleys placed in Column 1
-        eaves = get_num(st.text_input("Eaves (Linear Feet)", value=""))
-        valleys = get_num(st.text_input("Valleys (Linear Feet)", value=""))
+        # Inputs ordered exactly: 1. Eaves, 2. Valleys
+        eaves = get_num(st.text_input("Eaves (Linear Feet)", value=scanned_vals["eaves"]))
+        valleys = get_num(st.text_input("Valleys (Linear Feet)", value=scanned_vals["valleys"]))
 
     with col2:
-        # 3. Hips, 4. Ridges, & 5. Rakes placed in Column 2
-        hips = get_num(st.text_input("Hips (Linear Feet)", value=""))
-        ridges = get_num(st.text_input("Ridges (Linear Feet)", value=""))
-        rakes = get_num(st.text_input("Rakes (Linear Feet)", value=""))
+        # Inputs ordered exactly: 3. Hips, 4. Ridges, 5. Rakes
+        hips = get_num(st.text_input("Hips (Linear Feet)", value=scanned_vals["hips"]))
+        ridges = get_num(st.text_input("Ridges (Linear Feet)", value=scanned_vals["ridges"]))
+        rakes = get_num(st.text_input("Rakes (Linear Feet)", value=scanned_vals["rakes"]))
         
         waste_pct = get_num(st.text_input("Waste Factor (%)", value="10"))
 
     st.markdown("---")
     st.subheader("Material Options")
-
     opt_col1, opt_col2 = st.columns(2)
 
     with opt_col1:
@@ -185,19 +228,17 @@ else:
             "Underlayment Roll Size",
             options=[2, 5, 10],
             index=0,
-            format_func=lambda x: f"{x} SQ roll ({x * 100} sq ft)",
-            help="Select the roll size your supplier carries"
+            format_func=lambda x: f"{x} SQ roll ({x * 100} sq ft)"
         )
 
     drip_edge_length = 10
 
-    # ── Calculations ─────────────────────────────────────────────────────────
+    # Perimeter Formulas Logic
     WASTE_FACTOR = 1 + (waste_pct / 100)
     hip_ridge_lf = hips + ridges
 
     underlayment_rolls = math.ceil((sq_count * 1.15) / underlayment_roll_size)
     valley_sections = math.ceil(valleys / 10) if valleys > 0 else 0
-
     TILE_SQ_PER_PALLET = 2.97
 
     if material_type == "Tile":
@@ -212,10 +253,9 @@ else:
         
         tile_drip_pieces = (math.ceil(eaves / drip_edge_length) if eaves > 0 else 0) + 2
         birdstop_pieces = (math.ceil(eaves / 10) if eaves > 0 else 0) + 2
-        
         is_flat_tile = "Flat" in product
-        
         batten_bundles = math.ceil(sq_count)
+        
         if is_flat_tile:
             hip_bundles = 0
             ridge_bundles = math.ceil(hip_ridge_lf / 100) if hip_ridge_lf > 0 else 0
@@ -229,7 +269,6 @@ else:
         hip_ridge_bundles = math.ceil(hip_ridge_lf / 33) if hip_ridge_lf > 0 else 0
         starter_bundles = math.ceil(eaves / 100) if eaves > 0 else 0
 
-    # ── Results ───────────────────────────────────────────────────────────────
     st.header("2. Calculated Material Order")
 
     if sq_count > 0:
@@ -263,7 +302,6 @@ else:
                     f"{ridge_bundles} Bundles  ({ridges:.0f} LF @ 50 LF/bundle)",
                 ]
 
-            # MODIFIED: Removed item #7 (Rake Trim / Gabled Edge Flashings)
             descriptions = [
                 f"Field Tile: {product}",
                 f"Tile Underlayment ({underlayment_roll_size}-SQ Rolls)",
@@ -302,22 +340,16 @@ else:
 
         st.table({"Material Description": descriptions, "Calculated Quantity": quantities})
 
-        # ── Actions ──────────────────────────────────────────────────────────
         st.header("3. Actions")
         job_address = st.text_input("Job Address / Name", placeholder="e.g., Lot 42 - Whispering Pines")
-        crew_notes = st.text_area(
-            "Crew / Field Notes",
-            placeholder="e.g., steep pitch on north slope, no dumpster access on weekends, match existing color...",
-            height=100,
-        )
+        crew_notes = st.text_area("Crew / Field Notes", placeholder="e.g., access restrictions...", height=100)
 
         if st.button("Confirm & Ready to Order"):
             if job_address:
-                st.success(f"📦 Order Manifest generated for **{job_address}**! Copy the table above to send to your distributor.")
+                st.success(f"📦 Order Manifest generated for **{job_address}**!")
                 if crew_notes.strip():
                     st.info(f"📝 **Field Notes:** {crew_notes.strip()}")
             else:
                 st.warning("Please enter a Job Address before confirming.")
     else:
         st.info("💡 Enter a Square Count above to generate the material order manifest.")
-    
