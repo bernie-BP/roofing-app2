@@ -251,12 +251,10 @@ else:
     if material_type == "Tile":
         total_squares_with_waste = sq_count * WASTE_FACTOR
         
-        # UPDATED RULE: Optimized breakage math for lift & resets vs full new orders
         if job_type == "Re-Roof":
             if sq_count < 20:
                 pallets_needed = 0.5
             else:
-                # 1 full pallet for every 20 SQ, rounded up to the nearest half pallet
                 raw_pallets = sq_count / 20
                 pallets_needed = math.ceil(raw_pallets * 2) / 2
         else:
@@ -274,11 +272,17 @@ else:
             hip_bundles = math.ceil(hips / 25) if hips > 0 else 0
             ridge_bundles = math.ceil(ridges / 50) if ridges > 0 else 0
     else:
+        # Shingle Specific Structural Math Breakdown
         total_squares_with_waste = sq_count * WASTE_FACTOR
         shingle_drip_pieces = (math.ceil((eaves + rakes) / drip_edge_length) if (eaves + rakes) > 0 else 0) + 2
         field_bundles = math.ceil(total_squares_with_waste * bundles_per_sq)
         hip_ridge_bundles = math.ceil(hip_ridge_lf / 33) if hip_ridge_lf > 0 else 0
         starter_bundles = math.ceil(eaves / 100) if eaves > 0 else 0
+        
+        # NEW STRUCTURAL FASTENER FORMULAS
+        field_nail_boxes = math.ceil(total_squares_with_waste / 20) if sq_count > 0 else 0
+        eave_nail_boxes  = math.ceil(total_squares_with_waste / 20) if sq_count > 0 else 0
+        cap_nail_boxes   = math.ceil(total_squares_with_waste / 20) if sq_count > 0 else 0
 
     st.header("2. Calculated Material Order")
 
@@ -287,7 +291,7 @@ else:
             c1, c2, c3, c4 = st.columns(4)
             c1.metric(f"Field SQ (+{waste_pct:.0f}% Waste)", f"{total_squares_with_waste:.1f} SQ")
             pallet_label = "Pallets Needed" + (" (Re-Roof)" if job_type == "Re-Roof" else "")
-            c2.metric(pallet_label, f"{pallets_needed:g} Pallets", help="Re-Roof uses 1 pallet per 20 SQ for breakage allowance. <20 SQ defaults to 1/2 pallet.")
+            c2.metric(pallet_label, f"{pallets_needed:g} Pallets")
             c3.metric("Underlayment Rolls", f"{underlayment_rolls} Rolls")
             if is_flat_tile:
                 c4.metric("Hip/Ridge Closures", f"{ridge_bundles} Bundles")
@@ -322,7 +326,6 @@ else:
                 "Drip Edge (10ft sections, eaves only)",
             ]
             
-            # Label clarification string for manifest copies
             tile_manifest_label = f"{pallets_needed:g} Pallets (Breakage Allowance)" if job_type == "Re-Roof" else f"{total_squares_with_waste:.1f} SQ  ({pallets_needed:g} pallets @ 2.97 SQ/pallet)"
             
             quantities = [
@@ -334,12 +337,16 @@ else:
                 f"{tile_drip_pieces} Pieces  ({tile_drip_pieces * 10} LF)",
             ]
         else:
+            # UPDATED: Appended structural fastener sets to shingle groupings
             descriptions = [
                 f"Field Shingles: {product}",
                 f"Underlayment ({underlayment_roll_size}-SQ Rolls)",
                 "Hip & Ridge Cap Shingles",
                 "Starter Strip Shingles",
                 "Drip Edge (10ft sections)",
+                "Shingle Field Nails (1-1/4\" Coil)",
+                "Eave Coil Nails (1-3/4\" EG)",
+                "Plastic Cap Nails (1\" Caps)",
             ]
             quantities = [
                 f"{total_squares_with_waste:.1f} SQ  ({field_bundles} bundles @ {bundles_per_sq}/SQ)",
@@ -347,6 +354,9 @@ else:
                 f"{hip_ridge_bundles} Bundles  ({hip_ridge_bundles * 33} LF)",
                 f"{starter_bundles} Bundles  ({starter_bundles * 100} LF)",
                 f"{shingle_drip_pieces} Pieces  ({shingle_drip_pieces * 10} LF)",
+                f"{field_nail_boxes} Box(es)  ({total_squares_with_waste:.1f} SQ @ 20 SQ/box)",
+                f"{eave_nail_boxes} Box(es)  ({total_squares_with_waste:.1f} SQ @ 20 SQ/box)",
+                f"{cap_nail_boxes} Box(es)  ({total_squares_with_waste:.1f} SQ @ 20 SQ/box)",
             ]
 
         if valleys > 0:
