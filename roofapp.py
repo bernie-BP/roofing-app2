@@ -324,4 +324,3 @@ else:
                 st.warning("Please enter a Job Address before confirming.")
     else:
         st.info("💡 Enter a Square Count above to generate the material order manifest.")
-        
