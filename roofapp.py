@@ -3,7 +3,7 @@ import math
 
 st.set_page_config(page_title="Roofing Material Calculator", page_icon="🏠", layout="centered")
 
-st.title("Roofing Material Ordering Dashboard")
+st.title("Real Roofing MO calculator")
 st.write("Enter the job measurements below to automatically calculate required materials.")
 
 # ── Material Type ──────────────────────────────────────────────────────────────
