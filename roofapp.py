@@ -7,7 +7,6 @@ import re
 try:
     import pypdf
     PYPDF_AVAILABLE = True
-    # Clean up the system message cache if initialized inside a dynamic context
 except ImportError:
     PYPDF_AVAILABLE = False
 
@@ -32,7 +31,7 @@ st.write("Enter measurements manually or drop a Roofr report below to instantly 
 # ==========================================
 # 📋 ROOFR PDF PARSER ENGINE
 # ==========================================
-scanned_vals = {"sq": "", "eaves": "", "valleys": "", "hips": "", "ridges": "", "rakes": ""}
+scanned_vals = {"pitched_sq": "", "flat_sq": "", "eaves": "", "valleys": "", "hips": "", "ridges": "", "rakes": ""}
 
 st.header("📋 Automated Roofr Report Import")
 if not PYPDF_AVAILABLE:
@@ -49,27 +48,35 @@ else:
                 if text_content:
                     full_text += text_content + "\n"
             
-            # Simple text pattern extractors based on standard Roofr metrics structures
             def parse_metric(pattern, text):
                 match = re.search(pattern, text, re.IGNORECASE)
                 if match:
                     return match.group(1).strip()
                 return ""
 
-            # Target common text architectures used in standard Roofr measurement outlines
-            scanned_vals["sq"] = parse_metric(r"(?:Total Area|Squares)\s*[:\-]?\s*([\d\.,]+)\s*sq", full_text)
+            # UPDATED: Target Roofr's specific split layout for Pitched vs Flat areas
+            scanned_vals["pitched_sq"] = parse_metric(r"Pitched\s*Roof\s*Area\s*[:\-]?\s*([\d\.,]+)\s*sq", full_text)
+            scanned_vals["flat_sq"] = parse_metric(r"Flat\s*Roof\s*Area\s*[:\-]?\s*([\d\.,]+)\s*sq", full_text)
+            
+            # Fallback patterns if written as pure SQ units in report tables
+            if not scanned_vals["pitched_sq"]:
+                scanned_vals["pitched_sq"] = parse_metric(r"Pitched\s*Area\s*[:\-]?\s*([\d\.,]+)\s*SQ", full_text)
+            if not scanned_vals["flat_sq"]:
+                scanned_vals["flat_sq"] = parse_metric(r"Flat\s*Area\s*[:\-]?\s*([\d\.,]+)\s*SQ", full_text)
+            
+            # Universal fallback if no breakdown is found
+            if not scanned_vals["pitched_sq"] and not scanned_vals["flat_sq"]:
+                universal_sq = parse_metric(r"(?:Total Area|Squares)\s*[:\-]?\s*([\d\.,]+)\s*sq", full_text)
+                scanned_vals["pitched_sq"] = universal_sq
+                scanned_vals["flat_sq"] = universal_sq
+
+            # Standard perimeter lineals
             scanned_vals["eaves"] = parse_metric(r"Eaves\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
             scanned_vals["valleys"] = parse_metric(r"Valleys\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
             scanned_vals["hips"] = parse_metric(r"Hips\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
             scanned_vals["ridges"] = parse_metric(r"Ridges?\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
             scanned_vals["rakes"] = parse_metric(r"Rakes\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
             
-            # Alternate parsing rule for plain square values if standard label drops
-            if not scanned_vals["sq"]:
-                sq_match = re.search(r"([\d\.,]+)\s*SQ", full_text)
-                if sq_match:
-                    scanned_vals["sq"] = sq_match.group(1)
-
             st.success("✅ Roofr measurements scanned! Verify values in the tables below.")
         except Exception as e:
             st.error(f"Could not read PDF structure. Please check the file format. Error: {e}")
@@ -102,7 +109,8 @@ if material_type == "Mod Bit":
     mb_col1, mb_col2 = st.columns(2)
 
     with mb_col1:
-        mod_sq = get_num(st.text_input("Square Count (SQ)", value=scanned_vals["sq"], help="1 SQ = 100 sq ft"))
+        # UPDATED: Uses Flat Roof Area
+        mod_sq = get_num(st.text_input("Square Count (SQ)", value=scanned_vals["flat_sq"], help="Calculated using Flat Roof Area values from report"))
         mod_eaves = get_num(st.text_input("Eaves (Linear Feet)", value=scanned_vals["eaves"]))
         mod_rakes = get_num(st.text_input("Rakes (Linear Feet)", value=scanned_vals["rakes"]))
 
@@ -164,8 +172,6 @@ if material_type == "Mod Bit":
         if st.button("Confirm & Ready to Order"):
             if job_address:
                 st.success(f"📦 Order Manifest generated for **{job_address}**!")
-                if crew_notes.strip():
-                    st.info(f"📝 **Field Notes:** {crew_notes.strip()}")
             else:
                 st.warning("Please enter a Job Address before confirming.")
     else:
@@ -178,7 +184,8 @@ else:
     col1, col2 = st.columns(2)
 
     with col1:
-        sq_count = get_num(st.text_input("Square Count (SQ)", value=scanned_vals["sq"], help="1 SQ = 100 sq ft"))
+        # UPDATED: Uses Pitched Roof Area
+        sq_count = get_num(st.text_input("Square Count (SQ)", value=scanned_vals["pitched_sq"], help="Calculated using Pitched Roof Area values from report"))
 
         if material_type == "Tile":
             product = st.selectbox("Tile Type / Profile", [
@@ -207,12 +214,10 @@ else:
             bundles_per_sq = GAF_SHINGLES[product]
             st.caption(f"Coverage rate: **{bundles_per_sq} bundles per square**")
 
-        # Inputs ordered exactly: 1. Eaves, 2. Valleys
         eaves = get_num(st.text_input("Eaves (Linear Feet)", value=scanned_vals["eaves"]))
         valleys = get_num(st.text_input("Valleys (Linear Feet)", value=scanned_vals["valleys"]))
 
     with col2:
-        # Inputs ordered exactly: 3. Hips, 4. Ridges, 5. Rakes
         hips = get_num(st.text_input("Hips (Linear Feet)", value=scanned_vals["hips"]))
         ridges = get_num(st.text_input("Ridges (Linear Feet)", value=scanned_vals["ridges"]))
         rakes = get_num(st.text_input("Rakes (Linear Feet)", value=scanned_vals["rakes"]))
@@ -274,82 +279,5 @@ else:
     if sq_count > 0:
         if material_type == "Tile":
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric(f"Field SQ (+{waste_pct:.0f}% Waste)", f"{total_squares_with_waste:.1f} SQ")
-            pallet_label = "Pallets Needed" + (" (Re-Roof)" if job_type == "Re-Roof" else "")
-            c2.metric(pallet_label, f"{pallets_needed:g} Pallets")
-            c3.metric("Underlayment Rolls", f"{underlayment_rolls} Rolls")
-            if is_flat_tile:
-                c4.metric("Hip/Ridge Closures", f"{ridge_bundles} Bundles")
-            else:
-                c4.metric("Hip / Ridge Closures", f"{hip_bundles} / {ridge_bundles} Bundles")
-        else:
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric(f"Field SQ (+{waste_pct:.0f}% Waste)", f"{total_squares_with_waste:.1f} SQ")
-            c2.metric("Field Bundles", f"{field_bundles} Bundles")
-            c3.metric("Underlayment Rolls", f"{underlayment_rolls} Rolls")
-            c4.metric("Hip/Ridge Cap Bundles", f"{hip_ridge_bundles} Bundles")
-
-        st.markdown("### 📋 Detailed Order Manifest")
-
-        if material_type == "Tile":
-            if is_flat_tile:
-                hip_ridge_desc = ["Hip & Ridge Closures (100 LF/bundle)"]
-                hip_ridge_qty  = [f"{ridge_bundles} Bundles  ({hip_ridge_lf:.0f} LF @ 100 LF/bundle)"]
-            else:
-                hip_ridge_desc = ["Hip Closures (25 LF/bundle)", "Ridge Closures (50 LF/bundle)"]
-                hip_ridge_qty = [
-                    f"{hip_bundles} Bundles  ({hips:.0f} LF @ 25 LF/bundle)",
-                    f"{ridge_bundles} Bundles  ({ridges:.0f} LF @ 50 LF/bundle)",
-                ]
-
-            descriptions = [
-                f"Field Tile: {product}",
-                f"Tile Underlayment ({underlayment_roll_size}-SQ Rolls)",
-                *hip_ridge_desc,
-                "Roof Battens (1 bundle/SQ)",
-                "Eave Closure / Birdstop (10ft pieces)",
-                "Drip Edge (10ft sections, eaves only)",
-            ]
-            quantities = [
-                f"{total_squares_with_waste:.1f} SQ  ({pallets_needed:g} pallets @ 2.97 SQ/pallet)",
-                f"{underlayment_rolls} Rolls  (covers {underlayment_rolls * underlayment_roll_size} SQ)",
-                *hip_ridge_qty,
-                f"{batten_bundles} Bundles  ({sq_count:.0f} SQ)",
-                f"{birdstop_pieces} Pieces  ({birdstop_pieces * 10} LF)",
-                f"{tile_drip_pieces} Pieces  ({tile_drip_pieces * 10} LF)",
-            ]
-        else:
-            descriptions = [
-                f"Field Shingles: {product}",
-                f"Underlayment ({underlayment_roll_size}-SQ Rolls)",
-                "Hip & Ridge Cap Shingles",
-                "Starter Strip Shingles",
-                "Drip Edge (10ft sections)",
-            ]
-            quantities = [
-                f"{total_squares_with_waste:.1f} SQ  ({field_bundles} bundles @ {bundles_per_sq}/SQ)",
-                f"{underlayment_rolls} Rolls  (covers {underlayment_rolls * underlayment_roll_size} SQ)",
-                f"{hip_ridge_bundles} Bundles  ({hip_ridge_bundles * 33} LF)",
-                f"{starter_bundles} Bundles  ({starter_bundles * 100} LF)",
-                f"{shingle_drip_pieces} Pieces  ({shingle_drip_pieces * 10} LF)",
-            ]
-
-        if valleys > 0:
-            descriptions.append("Valley Flashing (W-Valley, 10ft sections)")
-            quantities.append(f"{valley_sections} Sections  ({valley_sections * 10} LF)")
-
-        st.table({"Material Description": descriptions, "Calculated Quantity": quantities})
-
-        st.header("3. Actions")
-        job_address = st.text_input("Job Address / Name", placeholder="e.g., Lot 42 - Whispering Pines")
-        crew_notes = st.text_area("Crew / Field Notes", placeholder="e.g., access restrictions...", height=100)
-
-        if st.button("Confirm & Ready to Order"):
-            if job_address:
-                st.success(f"📦 Order Manifest generated for **{job_address}**!")
-                if crew_notes.strip():
-                    st.info(f"📝 **Field Notes:** {crew_notes.strip()}")
-            else:
-                st.warning("Please enter a Job Address before confirming.")
-    else:
-        st.info("💡 Enter a Square Count above to generate the material order manifest.")
+            c1.metric(
+            
