@@ -2,14 +2,14 @@ import streamlit as st
 import math
 import os
 import re
-import base64
 
-# Safely import pypdf for text parsing
+# Handle backend PDF graphic engines natively
 try:
     import pypdf
-    PYPDF_AVAILABLE = True
+    from pdf2image import convert_from_bytes
+    PDF_ENGINES_AVAILABLE = True
 except ImportError:
-    PYPDF_AVAILABLE = False
+    PDF_ENGINES_AVAILABLE = False
 
 # Wide layout configuration to give ample space for the split panel view
 st.set_page_config(page_title="Roofing Material Calculator", page_icon="🏠", layout="wide")
@@ -22,43 +22,42 @@ def get_num(val):
     except ValueError:
         return 0.0
 
-# Helper function to convert PDF bytes to an embedded base64 scrollable frame
-def display_pdf_scrollable(file_bytes):
-    base64_pdf = base64.b64encode(file_bytes).decode('utf-8')
-    pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="700" type="application/pdf" style="border:1px solid #ccc; border-radius:5px;"></iframe>'
-    st.markdown(pdf_display, unsafe_allow_html=True)
-
 if os.path.exists("logo.png"):
     st.image("logo.png", width=200)
 
 st.title("Roofing Material Ordering Dashboard")
-st.write("Drop your job files below to scroll through blueprints and pricing models on the right while managing parameters on the left.")
+st.write("Drop your job files below to view blueprints and pricing models on the right while managing parameters on the left.")
 
 # ==========================================
 # 📋 TWO-FILE UPLOADER HUB
 # ==========================================
 scanned_vals = {"pitched_sq": "", "flat_sq": "", "eaves": "", "valleys": "", "hips": "", "ridges": "", "rakes": ""}
-roofr_file_bytes = None
-quote_file_bytes = None
+roofr_pages_bytes = None
+quote_pages_bytes = None
+total_roofr_pages = 1
+total_quote_pages = 1
 
 st.header("📋 Automated Document Upload Hub")
-
-# Twin File Upload Row
-up_col1, up_col2 = st.columns(2)
-
-with up_col1:
-    uploaded_roofr = st.file_uploader("1. Upload Roofr Measurement Report (PDF)", type=["pdf"])
-with up_col2:
-    uploaded_quote = st.file_uploader("2. Upload Estimate / Supplier Quote (PDF)", type=["pdf"])
-
-# Process File 1: Roofr Takeoff Text Parsing
-if uploaded_roofr is not None:
-    try:
-        roofr_file_bytes = uploaded_roofr.read()
-        uploaded_roofr.seek(0)
-        
-        if PYPDF_AVAILABLE:
+if not PDF_ENGINES_AVAILABLE:
+    st.info("💡 *PDF Processing Modules are active when deployed live with pypdf and pdf2image requirements.*")
+else:
+    # Twin File Upload Row
+    up_col1, up_col2 = st.columns(2)
+    
+    with up_col1:
+        uploaded_roofr = st.file_uploader("1. Upload Roofr Measurement Report (PDF)", type=["pdf"])
+    with up_col2:
+        uploaded_quote = st.file_uploader("2. Upload Estimate / Supplier Quote (PDF)", type=["pdf"])
+    
+    # Process File 1: Roofr Takeoff Text Parsing & Sizing Check
+    if uploaded_roofr is not None:
+        try:
+            roofr_pages_bytes = uploaded_roofr.read()
+            uploaded_roofr.seek(0)
+            
             reader = pypdf.PdfReader(uploaded_roofr)
+            total_roofr_pages = len(reader.pages)
+            
             full_text = ""
             for page in reader.pages:
                 text_content = page.extract_text()
@@ -96,12 +95,19 @@ if uploaded_roofr is not None:
             scanned_vals["rakes"] = parse_metric(r"Rakes\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
             
             st.success("✅ Roofr measurements scanned into left-side configuration controls!")
-    except Exception as e:
-        st.error(f"Could not parse Roofr text rules. Error: {e}")
+        except Exception as e:
+            st.error(f"Could not parse Roofr blueprint text. Error: {e}")
 
-# Process File 2: Catch bytes for Quote display
-if uploaded_quote is not None:
-    quote_file_bytes = uploaded_quote.read()
+    # Process File 2: Total Page Count Check on Supplier Quote
+    if uploaded_quote is not None:
+        try:
+            quote_pages_bytes = uploaded_quote.read()
+            uploaded_quote.seek(0)
+            reader_quote = pypdf.PdfReader(uploaded_quote)
+            total_quote_pages = len(reader_quote.pages)
+            st.success("✅ Supplier material quote ready for visualization panels!")
+        except Exception as e:
+            st.error(f"Could not read estimate page indexing. Error: {e}")
 
 st.markdown("---")
 
@@ -181,23 +187,47 @@ with left_panel:
             eave_nail_boxes  = math.ceil(sq_count / 20) if sq_count > 0 else 0
             cap_nail_boxes   = math.ceil(sq_count / 20) if sq_count > 0 else 0
 
-# 🖼️ RIGHT PANEL: SCROLLABLE IFRAME VIEWPORTS
+# 🖼️ RIGHT PANEL: BROWSER-SAFE IMAGE RENDER CORES
 with right_panel:
     st.subheader("🖼️ Job File Document Matrix")
     
     doc_view_col1, doc_view_col2 = st.columns(2)
     
     with doc_view_col1:
-        st.markdown("**1. Roofr Schematic Map (Scrollable)**")
-        if roofr_file_bytes is not None:
-            display_pdf_scrollable(roofr_file_bytes)
+        st.markdown("**1. Roofr Schematic Map**")
+        if roofr_pages_bytes is not None:
+            # Brave-safe page selector
+            roofr_page_selection = st.selectbox(
+                "Go to Page",
+                options=list(range(1, total_roofr_pages + 1)),
+                format_func=lambda x: f"Page {x} of {total_roofr_pages}",
+                key="roofr_page_selector"
+            )
+            try:
+                images_roofr = convert_from_bytes(roofr_pages_bytes, first_page=roofr_page_selection, last_page=roofr_page_selection)
+                if images_roofr:
+                    st.image(images_roofr[0], use_column_width=True)
+            except Exception as img_err:
+                st.caption("Rendering document view...")
         else:
             st.caption("Waiting for Roofr Takeoff Report...")
             
     with doc_view_col2:
-        st.markdown("**2. Active Supplier Estimate (Scrollable)**")
-        if quote_file_bytes is not None:
-            display_pdf_scrollable(quote_file_bytes)
+        st.markdown("**2. Active Supplier Estimate**")
+        if quote_pages_bytes is not None:
+            # Brave-safe page selector
+            quote_page_selection = st.selectbox(
+                "Go to Page",
+                options=list(range(1, total_quote_pages + 1)),
+                format_func=lambda x: f"Page {x} of {total_quote_pages}",
+                key="quote_page_selector"
+            )
+            try:
+                images_quote = convert_from_bytes(quote_pages_bytes, first_page=quote_page_selection, last_page=quote_page_selection)
+                if images_quote:
+                    st.image(images_quote[0], use_column_width=True)
+            except Exception as img_err:
+                st.caption("Rendering document view...")
         else:
             st.caption("Waiting for Distributor Quote file...")
 
@@ -250,5 +280,3 @@ if manifest_ready:
     job_address = st.text_input("Job Address / Name", placeholder="e.g., Lot 42 - Whispering Pines")
     if st.button("Confirm & Ready to Order") and job_address:
         st.success(f"📦 Order Manifest generated for **{job_address}**!")
-else:
-    st.info("💡 Upload data files or enter sizing values to populate the order manifests.")
