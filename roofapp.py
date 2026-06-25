@@ -1,9 +1,14 @@
 import streamlit as st
 import math
+import os
 
 st.set_page_config(page_title="Roofing Material Calculator", page_icon="🏠", layout="centered")
 
-st.title("Real Roofing MO calculator")
+# Safety Check: Only show the logo if the file actually exists in your repository
+if os.path.exists("logo.png"):
+    st.image("logo.png", width=200)
+
+st.title("Roofing Material Ordering Dashboard")
 st.write("Enter the job measurements below to automatically calculate required materials.")
 
 # ── Material Type ──────────────────────────────────────────────────────────────
@@ -189,7 +194,6 @@ else:
     hip_ridge_lf = hips + ridges
 
     underlayment_rolls = math.ceil((sq_count * 1.15) / underlayment_roll_size)
-    drip_edge_pieces = (math.ceil(eaves / drip_edge_length) if eaves > 0 else 0) + 2
     valley_sections = math.ceil(valleys / 10) if valleys > 0 else 0
 
     TILE_SQ_PER_PALLET = 2.97
@@ -203,9 +207,11 @@ else:
                 pallets_needed = math.ceil(total_squares_with_waste / TILE_SQ_PER_PALLET) + 1
         else:
             pallets_needed = math.ceil(total_squares_with_waste / TILE_SQ_PER_PALLET)
+        
+        tile_drip_pieces = (math.ceil(eaves / drip_edge_length) if eaves > 0 else 0) + 2
         birdstop_pieces = (math.ceil(eaves / 10) if eaves > 0 else 0) + 2
         is_flat_tile = "Flat" in product or "Plana" in product
-        batten_bundles = math.ceil(sq_count)  # 1 bundle per SQ, no waste factor
+        batten_bundles = math.ceil(sq_count)
         if is_flat_tile:
             hip_bundles = 0
             ridge_bundles = math.ceil(hip_ridge_lf / 100) if hip_ridge_lf > 0 else 0
@@ -215,6 +221,7 @@ else:
         rake_trim_pieces = math.ceil(rakes / 10) if rakes > 0 else 0
     else:
         total_squares_with_waste = sq_count * WASTE_FACTOR
+        shingle_drip_pieces = (math.ceil((eaves + rakes) / drip_edge_length) if (eaves + rakes) > 0 else 0) + 2
         field_bundles = math.ceil(total_squares_with_waste * bundles_per_sq)
         hip_ridge_bundles = math.ceil(hip_ridge_lf / 33) if hip_ridge_lf > 0 else 0
         starter_bundles = math.ceil(eaves / 100) if eaves > 0 else 0
@@ -262,7 +269,7 @@ else:
                 *hip_ridge_desc,
                 "Roof Battens (1 bundle/SQ)",
                 "Eave Closure / Birdstop (10ft pieces)",
-                "Drip Edge (10ft sections)",
+                "Drip Edge (10ft sections, eaves only)",
                 "Rake Trim / Gabled Edge Flashings (10ft sections)",
             ]
             quantities = [
@@ -271,7 +278,7 @@ else:
                 *hip_ridge_qty,
                 f"{batten_bundles} Bundles  ({sq_count:.0f} SQ)",
                 f"{birdstop_pieces} Pieces  ({birdstop_pieces * 10} LF)",
-                f"{drip_edge_pieces} Pieces  ({drip_edge_pieces * 10} LF)",
+                f"{tile_drip_pieces} Pieces  ({tile_drip_pieces * 10} LF)",
                 f"{rake_trim_pieces} Pieces  ({rake_trim_pieces * 10} LF)",
             ]
         else:
@@ -287,7 +294,7 @@ else:
                 f"{underlayment_rolls} Rolls  (covers {underlayment_rolls * underlayment_roll_size} SQ)",
                 f"{hip_ridge_bundles} Bundles  ({hip_ridge_bundles * 33} LF)",
                 f"{starter_bundles} Bundles  ({starter_bundles * 100} LF)",
-                f"{drip_edge_pieces} Pieces  ({drip_edge_pieces * 10} LF)",
+                f"{shingle_drip_pieces} Pieces  ({shingle_drip_pieces * 10} LF)",
             ]
 
         if valleys > 0:
