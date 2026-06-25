@@ -113,7 +113,7 @@ with left_panel:
     st.subheader("🛠️ Production Controls & Layout Settings")
     
     material_type = st.radio("Material Type", options=["Tile", "Shingles", "Mod Bit"], horizontal=True)
-    job_type = st.radio("Job Type", options=["New Tile", "Re-Roof"], horizontal=True) if material_type == "Tile" else None
+    job_type = st.radio("Job Type", options=["New Tile", "Re-Roof"], index=1, horizontal=True) if material_type == "Tile" else None
     
     st.markdown("### 📏 Dimensions")
     
@@ -191,7 +191,6 @@ with right_panel:
     
     st.markdown("---")
     
-    # Render logic that aggregates all pages into a fixed-height scrollbox element
     target_bytes = roofr_pages_bytes if "Roofr" in view_toggle else quote_pages_bytes
     label_tag = "Roofr Takeoff Blueprint" if "Roofr" in view_toggle else "Supplier Material Quote"
     
@@ -201,7 +200,6 @@ with right_panel:
                 all_images = convert_from_bytes(target_bytes)
                 html_content = '<div style="height: 750px; overflow-y: scroll; border: 2px solid #4A5568; border-radius: 8px; padding: 10px; background-color: #1A202C;">'
                 
-                # Turn each page into a web-safe Base64 image string so it stays bundled inside the component container
                 for i, page_img in enumerate(all_images):
                     buffered = BytesIO()
                     page_img.save(buffered, format="JPEG")
@@ -212,8 +210,6 @@ with right_panel:
                     html_content += f'</div>'
                     
                 html_content += '</div>'
-                
-                # Display the compiled scroll window
                 components.html(html_content, height=770, scrolling=False)
         except Exception as err:
             st.caption("Rendering continuous visual frame profile...")
@@ -225,6 +221,9 @@ st.markdown("---")
 st.header("2. Calculated Material Order")
 
 manifest_ready = False
+descriptions = []
+quantities = []
+
 if material_type == "Mod Bit" and (mod_sq > 0 or (mod_eaves + mod_rakes) > 0):
     manifest_ready = True
     c1, c2, c3 = st.columns(3)
@@ -265,9 +264,65 @@ if manifest_ready:
         
     st.table({"Material Description": descriptions, "Calculated Quantity": quantities})
     
-    st.header("3. Actions")
-    job_address = st.text_input("Job Address / Name", placeholder="e.g., Lot 42 - Whispering Pines")
-    if st.button("Confirm & Ready to Order") and job_address:
-        st.success(f"📦 Order Manifest generated for **{job_address}**!")
+    st.header("3. Operations Actions")
+    
+    act_col1, act_col2 = st.columns(2)
+    with act_col1:
+        job_address = st.text_input("Job Address / Name", placeholder="e.g., Lot 42 - Whispering Pines")
+    with act_col2:
+        crew_notes = st.text_input("Crew / Field Logistics Notes", placeholder="e.g., Dumpster in driveway, protect bushes on north slope...")
+    
+    # NEW FEATURE: Delivery Ticket HTML Generator Blueprint
+    table_rows_html = ""
+    for desc, qty in zip(descriptions, quantities):
+        table_rows_html += f"<tr><td style='padding:10px; border-bottom:1px solid #ddd;'>{desc}</td><td style='padding:10px; border-bottom:1px solid #ddd; text-align:right; font-weight:bold;'>{qty}</td></tr>"
+
+    html_ticket_template = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; padding: 40px; color: #333;">
+        <div style="border: 2px solid #333; padding: 20px; border-radius: 8px;">
+            <h2 style="text-align: center; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px;">Roofing Material Delivery Ticket</h2>
+            <p style="text-align: center; color: #666; margin-top: 0; font-size: 13px;">Production manifest generated via Calculator Dashboard</p>
+            <hr style="border: 1px solid #333; margin-bottom: 20px;">
+            
+            <table style="width: 100%; margin-bottom: 20px; font-size: 14px;">
+                <tr><td><strong>Job Location:</strong> {job_address if job_address else 'Not Specified'}</td></tr>
+                <tr><td><strong>Material Category:</strong> {material_type} {'('+job_type+')' if job_type else ''}</td></tr>
+                <tr><td><strong>Logistics/Crew Notes:</strong> {crew_notes if crew_notes else 'None listed.'}</td></tr>
+            </table>
+            
+            <h3 style="background: #f4f4f4; padding: 8px; margin-bottom: 10px; font-size: 15px;">📦 Loaded Material Checklist</h3>
+            <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                <thead>
+                    <tr style="background: #e2e2e2;"><th style="padding:10px; text-align:left;">Material Description</th><th style="padding:10px; text-align:right;">Quantity Loaded</th></tr>
+                </thead>
+                <tbody>
+                    {table_rows_html}
+                </tbody>
+            </table>
+            
+            <div style="margin-top: 50px; font-size: 12px; display: flex; justify-content: space-between;">
+                <div><p>_____________________________________<br>Driver Loading Verification Signature</p></div>
+                <div style="text-align: right;"><p>_____________________________________<br>Field Superintendent Receiving Signature</p></div>
+            </div>
+        </div>
+        <script>window.print();</script>
+    </body>
+    </html>
+    """
+
+    # Create a simple direct printing function using standard web frames
+    st.markdown("### 🖨️ Document Export Center")
+    if job_address:
+        st.download_button(
+            label="Download Delivery Ticket Printout File",
+            data=html_ticket_template,
+            file_name=f"Delivery_Ticket_{job_address.replace(' ', '_')}.html",
+            mime="text/html",
+            help="Downloads a print-ready document file. Opening this file will instantly open your computer's standard print menu to print or save as a clean PDF document."
+        )
+    else:
+        st.caption("⚠️ *Type a Job Address / Name above to unlock the printable Delivery Ticket file generator.*")
+        
 else:
     st.info("💡 Upload data files or enter sizing values to populate the order manifests.")
