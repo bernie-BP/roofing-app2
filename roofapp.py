@@ -68,7 +68,7 @@ else:
                 raw_pitched_ft = universal_ft
                 raw_flat_ft = universal_ft
 
-            # FIXED FORMULA: Convert raw square footage to SQ squares (divide by 100)
+            # Convert raw square footage to SQ squares (divide by 100)
             if raw_pitched_ft:
                 scanned_vals["pitched_sq"] = f"{get_num(raw_pitched_ft) / 100:.1f}"
             if raw_flat_ft:
@@ -250,11 +250,15 @@ else:
 
     if material_type == "Tile":
         total_squares_with_waste = sq_count * WASTE_FACTOR
+        
+        # UPDATED RULE: Optimized breakage math for lift & resets vs full new orders
         if job_type == "Re-Roof":
             if sq_count < 20:
-                pallets_needed = math.ceil(total_squares_with_waste / TILE_SQ_PER_PALLET) + 0.5
+                pallets_needed = 0.5
             else:
-                pallets_needed = math.ceil(total_squares_with_waste / TILE_SQ_PER_PALLET) + 1
+                # 1 full pallet for every 20 SQ, rounded up to the nearest half pallet
+                raw_pallets = sq_count / 20
+                pallets_needed = math.ceil(raw_pallets * 2) / 2
         else:
             pallets_needed = math.ceil(total_squares_with_waste / TILE_SQ_PER_PALLET)
         
@@ -283,7 +287,7 @@ else:
             c1, c2, c3, c4 = st.columns(4)
             c1.metric(f"Field SQ (+{waste_pct:.0f}% Waste)", f"{total_squares_with_waste:.1f} SQ")
             pallet_label = "Pallets Needed" + (" (Re-Roof)" if job_type == "Re-Roof" else "")
-            c2.metric(pallet_label, f"{pallets_needed:g} Pallets")
+            c2.metric(pallet_label, f"{pallets_needed:g} Pallets", help="Re-Roof uses 1 pallet per 20 SQ for breakage allowance. <20 SQ defaults to 1/2 pallet.")
             c3.metric("Underlayment Rolls", f"{underlayment_rolls} Rolls")
             if is_flat_tile:
                 c4.metric("Hip/Ridge Closures", f"{ridge_bundles} Bundles")
@@ -317,8 +321,12 @@ else:
                 "Eave Closure / Birdstop (10ft pieces)",
                 "Drip Edge (10ft sections, eaves only)",
             ]
+            
+            # Label clarification string for manifest copies
+            tile_manifest_label = f"{pallets_needed:g} Pallets (Breakage Allowance)" if job_type == "Re-Roof" else f"{total_squares_with_waste:.1f} SQ  ({pallets_needed:g} pallets @ 2.97 SQ/pallet)"
+            
             quantities = [
-                f"{total_squares_with_waste:.1f} SQ  ({pallets_needed:g} pallets @ 2.97 SQ/pallet)",
+                tile_manifest_label,
                 f"{underlayment_rolls} Rolls  (covers {underlayment_rolls * underlayment_roll_size} SQ)",
                 *hip_ridge_qty,
                 f"{batten_bundles} Bundles  ({sq_count:.0f} SQ)",
