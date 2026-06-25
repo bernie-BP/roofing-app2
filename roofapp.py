@@ -3,16 +3,17 @@ import math
 import os
 import re
 
-# Safely import pypdf for local/production server use
+# Safely handle backend PDF graphic engine imports
 try:
     import pypdf
-    PYPDF_AVAILABLE = True
+    from pdf2image import convert_from_bytes
+    PDF_ENGINES_AVAILABLE = True
 except ImportError:
-    PYPDF_AVAILABLE = False
+    PDF_ENGINES_AVAILABLE = False
 
-st.set_page_config(page_title="Roofing Material Calculator", page_icon="🏠", layout="centered")
+# Wide layout configuration to give ample space for the split panel view
+st.set_page_config(page_title="Roofing Material Calculator", page_icon="🏠", layout="wide")
 
-# Helper function to convert empty text strings safely to floats
 def get_num(val):
     if not val or str(val).strip() == "":
         return 0.0
@@ -21,27 +22,41 @@ def get_num(val):
     except ValueError:
         return 0.0
 
-# Safety Check: Only show the logo if the file actually exists
 if os.path.exists("logo.png"):
     st.image("logo.png", width=200)
 
 st.title("Roofing Material Ordering Dashboard")
-st.write("Enter measurements manually or drop a Roofr report below to instantly generate distributor manifests.")
+st.write("Drop your job files below to project blueprints and pricing models on the right while managing production parameters on the left.")
 
 # ==========================================
-# 📋 ROOFR PDF PARSER ENGINE
+# 📋 TWO-FILE UPLOADER HUB
 # ==========================================
 scanned_vals = {"pitched_sq": "", "flat_sq": "", "eaves": "", "valleys": "", "hips": "", "ridges": "", "rakes": ""}
+roofr_preview_image = None
+quote_preview_image = None
 
-st.header("📋 Automated Roofr Report Import")
-if not PYPDF_AVAILABLE:
-    st.info("💡 *PDF Reader Mode is available when deployed live with a requirements file. Standard manual input is active below.*")
+st.header("📋 Automated Document Upload Hub")
+if not PDF_ENGINES_AVAILABLE:
+    st.info("💡 *PDF Processing Modules are active when deployed live with pypdf and pdf2image requirements.*")
 else:
-    uploaded_file = st.file_uploader("Upload a Roofr PDF Measurement Report", type=["pdf"])
+    # Twin File Upload Row
+    up_col1, up_col2 = st.columns(2)
     
-    if uploaded_file is not None:
+    with up_col1:
+        uploaded_roofr = st.file_uploader("1. Upload Roofr Measurement Report (PDF)", type=["pdf"])
+    with up_col2:
+        uploaded_quote = st.file_uploader("2. Upload Estimate / Supplier Quote (PDF)", type=["pdf"])
+    
+    # Process File 1: Roofr Takeoff
+    if uploaded_roofr is not None:
         try:
-            reader = pypdf.PdfReader(uploaded_file)
+            file_bytes_roofr = uploaded_roofr.read()
+            images_roofr = convert_from_bytes(file_bytes_roofr, first_page=1, last_page=1)
+            if images_roofr:
+                roofr_preview_image = images_roofr[0]
+                
+            uploaded_roofr.seek(0)
+            reader = pypdf.PdfReader(uploaded_roofr)
             full_text = ""
             for page in reader.pages:
                 text_content = page.extract_text()
@@ -54,7 +69,6 @@ else:
                     return match.group(1).strip()
                 return ""
 
-            # Extract raw square footage strings
             raw_pitched_ft = parse_metric(r"Pitched\s*Roof\s*Area\s*[:\-]?\s*([\d\.,]+)\s*sq", full_text)
             raw_flat_ft = parse_metric(r"Flat\s*Roof\s*Area\s*[:\-]?\s*([\d\.,]+)\s*sq", full_text)
             
@@ -68,311 +82,178 @@ else:
                 raw_pitched_ft = universal_ft
                 raw_flat_ft = universal_ft
 
-            # Convert raw square footage to SQ squares (divide by 100)
             if raw_pitched_ft:
                 scanned_vals["pitched_sq"] = f"{get_num(raw_pitched_ft) / 100:.1f}"
             if raw_flat_ft:
                 scanned_vals["flat_sq"] = f"{get_num(raw_flat_ft) / 100:.1f}"
 
-            # Standard perimeter lineals
             scanned_vals["eaves"] = parse_metric(r"Eaves\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
             scanned_vals["valleys"] = parse_metric(r"Valleys\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
             scanned_vals["hips"] = parse_metric(r"Hips\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
             scanned_vals["ridges"] = parse_metric(r"Ridges?\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
             scanned_vals["rakes"] = parse_metric(r"Rakes\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
             
-            st.success("✅ Roofr measurements scanned and converted to SQ! Verify values below.")
+            st.success("✅ Roofr measurements scanned into left-side configuration controls!")
         except Exception as e:
-            st.error(f"Could not read PDF structure. Error: {e}")
+            st.error(f"Could not parse Roofr blueprint. Error: {e}")
+
+    # Process File 2: Distributor Price Quote
+    if uploaded_quote is not None:
+        try:
+            file_bytes_quote = uploaded_quote.read()
+            images_quote = convert_from_bytes(file_bytes_quote, first_page=1, last_page=1)
+            if images_quote:
+                quote_preview_image = images_quote[0]
+            st.success("✅ Supplier material quote generated in right-side split view panel!")
+        except Exception as e:
+            st.error(f"Could not render estimate document view. Error: {e}")
 
 st.markdown("---")
 
-# ── Material Type Selector ──────────────────────────────────────────────────
-st.header("1. Job Measurements & Specifications")
+# ==========================================
+# 🗺️ SPLIT DASHBOARD LAYOUT (LEFT/RIGHT)
+# ==========================================
+left_panel, right_panel = st.columns([1.0, 1.0], gap="large")
 
-material_type = st.radio(
-    "Material Type",
-    options=["Tile", "Shingles", "Mod Bit"],
-    horizontal=True,
-)
-
-job_type = None
-if material_type == "Tile":
-    job_type = st.radio(
-        "Job Type",
-        options=["New Tile", "Re-Roof"],
-        horizontal=True,
-    )
-
-st.markdown("---")
-
-# ══════════════════════════════════════════════════════════════════════════════
-# MOD BIT SECTION
-# ══════════════════════════════════════════════════════════════════════════════
-if material_type == "Mod Bit":
-    mb_col1, mb_col2 = st.columns(2)
-
-    with mb_col1:
-        mod_sq = get_num(st.text_input("Square Count (SQ)", value=scanned_vals["flat_sq"], help="Flat Roof Area converted to Squares (SQ)"))
+# 📥 LEFT PANEL: MATERIAL ENGINE CONFIGURATION
+with left_panel:
+    st.subheader("🛠️ Production Controls & Layout Settings")
+    
+    material_type = st.radio("Material Type", options=["Tile", "Shingles", "Mod Bit"], horizontal=True)
+    job_type = st.radio("Job Type", options=["New Tile", "Re-Roof"], horizontal=True) if material_type == "Tile" else None
+    
+    st.markdown("### 📏 Dimensions")
+    
+    if material_type == "Mod Bit":
+        mod_sq = get_num(st.text_input("Square Count (SQ)", value=scanned_vals["flat_sq"]))
         mod_eaves = get_num(st.text_input("Eaves (Linear Feet)", value=scanned_vals["eaves"]))
         mod_rakes = get_num(st.text_input("Rakes (Linear Feet)", value=scanned_vals["rakes"]))
-
-    with mb_col2:
-        CAPSHEET_COLORS = [
-            "Buff", "Grey Slate", "Black", "Heather Blend", 
-            "Chestnut", "Oak", "White", "Red Blend", 
-            "Pine Green", "Weatherwood"
-        ]
+        
+        CAPSHEET_COLORS = ["Buff", "Grey Slate", "Black", "White", "Weatherwood"]
         cap_color = st.selectbox("Cap Sheet Color", CAPSHEET_COLORS)
+        mod_bit_base_type = st.selectbox("Select Base Layer Material Type", options=["Base Sheet (2 SQ per roll)", "SAV 9\" Self-Adhered (66 LF per roll)"])
         
-        mod_bit_base_type = st.selectbox(
-            "Select Base Layer Material Type",
-            options=["Base Sheet (2 SQ per roll)", "SAV 9\" Self-Adhered (66 LF per roll)"],
-            help="Choose which product you are using for the base layer to calculate correct rolls."
-        )
-
-    st.markdown("---")
-
-    # Mod Bit Math Calculations
-    drip_edge_length = 10
-    mb_drip_pieces  = (math.ceil(mod_eaves / drip_edge_length) if mod_eaves > 0 else 0) + 2
-    cap_rolls       = math.ceil(mod_sq) if mod_sq > 0 else 0
-
-    if mod_bit_base_type == "Base Sheet (2 SQ per roll)":
-        base_rolls = math.ceil(mod_sq / 2) if mod_sq > 0 else 0
-        base_description = "Polyglass Base Sheet"
-        base_quantity_str = f"{base_rolls} Rolls  (covers {base_rolls * 2} SQ)"
-    else:
-        base_rolls = math.ceil((mod_eaves + mod_rakes) / 66) if (mod_eaves + mod_rakes) > 0 else 0
-        base_description = 'Polyglass SAV 9" Self-Adhered (66 LF/roll)'
-        base_quantity_str = f"{base_rolls} Rolls  ({mod_eaves + mod_rakes:.0f} LF @ 66 LF/roll)"
-
-    st.header("2. Calculated Material Order")
-
-    if mod_sq > 0 or (mod_eaves + mod_rakes) > 0:
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Cap Sheet Rolls", f"{cap_rolls} Rolls", help="1 SQ per roll")
-        c2.metric(f"{mod_bit_base_type.split(' (')[0]} Rolls", f"{base_rolls} Rolls")
-        c3.metric("Drip Edge Pieces", f"{mb_drip_pieces} Pcs", help="10ft sections, eaves only")
-
-        st.markdown("### 📋 Detailed Order Manifest")
-        descriptions = [
-            f"Polyglass Cap Sheet — {cap_color}",
-            base_description,
-            "Drip Edge (10ft sections, eaves only)",
-        ]
-        quantities = [
-            f"{cap_rolls} Rolls  (covers {cap_rolls} SQ)",
-            base_quantity_str,
-            f"{mb_drip_pieces} Pieces  ({mb_drip_pieces * 10} LF)",
-        ]
-        st.table({"Material Description": descriptions, "Calculated Quantity": quantities})
-
-        st.header("3. Actions")
-        job_address = st.text_input("Job Address / Name", placeholder="e.g., Lot 42 - Whispering Pines")
-        crew_notes = st.text_area("Crew / Field Notes", placeholder="e.g., flat deck, drain locations...", height=100)
-
-        if st.button("Confirm & Ready to Order"):
-            if job_address:
-                st.success(f"📦 Order Manifest generated for **{job_address}**!")
-            else:
-                st.warning("Please enter a Job Address before confirming.")
-    else:
-        st.info("💡 Enter a Square Count or linear footage above to generate the material order manifest.")
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TILE & SHINGLES SECTIONS
-# ══════════════════════════════════════════════════════════════════════════════
-else:
-    col1, col2 = st.columns(2)
-
-    with col1:
-        sq_count = get_num(st.text_input("Square Count (SQ)", value=scanned_vals["pitched_sq"], help="Pitched Roof Area converted to Squares (SQ)"))
-
-        if material_type == "Tile":
-            product = st.selectbox("Tile Type / Profile", [
-                "Eagle (S-Profile)", "Eagle (W-Profile)", "Eagle (Flat)",
-                "Westlake (S-Profile)", "Westlake (W-Profile)", "Westlake (Flat)"
-            ])
+        drip_edge_length = 10
+        mb_drip_pieces = (math.ceil(mod_eaves / drip_edge_length) if mod_eaves > 0 else 0) + 2
+        cap_rolls = math.ceil(mod_sq) if mod_sq > 0 else 0
+        
+        if mod_bit_base_type == "Base Sheet (2 SQ per roll)":
+            base_rolls = math.ceil(mod_sq / 2) if mod_sq > 0 else 0
+            base_description, base_quantity_str = "Polyglass Base Sheet", f"{base_rolls} Rolls (covers {base_rolls * 2} SQ)"
         else:
-            GAF_SHINGLES = {
-                "GAF Timberline HDZ (Architectural)":                   3,
-                "GAF Royal Sovereign (3-Tab)":                          3,
-                "GAF Timberline UHDZ (Ultra High Definition)":          3,
-                "GAF Timberline CS Cool Series (Architectural)":        3,
-                "GAF Timberline American Harvest (Architectural)":      3,
-                "GAF Timberline Natural Shadow (Architectural)":        3,
-                "GAF Timberline AS II (Architectural)":                 3,
-                "GAF Grand Canyon (Designer)":                          3,
-                "GAF Slateline (Designer)":                             3,
-                "GAF Woodland (Designer)":                              3,
-                "GAF Grand Sequoia (Designer)":                         3,
-                "GAF Camelot II (Designer)":                            4,
-                "GAF Monaco (Designer)":                                4,
-                "GAF Country Mansion (Designer)":                        4,
-                "GAF Glenwood (Designer)":                              4,
-            }
-            product = st.selectbox("Shingle Type (GAF)", list(GAF_SHINGLES.keys()))
-            bundles_per_sq = GAF_SHINGLES[product]
-            st.caption(f"Coverage rate: **{bundles_per_sq} bundles per square**")
+            base_rolls = math.ceil((mod_eaves + mod_rakes) / 66) if (mod_eaves + mod_rakes) > 0 else 0
+            base_description, base_quantity_str = 'Polyglass SAV 9" Self-Adhered (66 LF/roll)', f"{base_rolls} Rolls ({mod_eaves + mod_rakes:.0f} LF @ 66 LF/roll)"
+            
+    else:
+        sub_col1, sub_col2 = st.columns(2)
+        with sub_col1:
+            sq_count = get_num(st.text_input("Square Count (SQ)", value=scanned_vals["pitched_sq"]))
+            product = st.selectbox("Product Profile", ["Eagle (S-Profile)", "Eagle (W-Profile)", "Eagle (Flat)", "Westlake (S-Profile)", "Westlake (W-Profile)", "Westlake (Flat)"] if material_type == "Tile" else ["GAF Timberline HDZ (Architectural)", "GAF Royal Sovereign (3-Tab)", "GAF Timberline UHDZ"])
+            eaves = get_num(st.text_input("Eaves (Linear Feet)", value=scanned_vals["eaves"]))
+            valleys = get_num(st.text_input("Valleys (Linear Feet)", value=scanned_vals["valleys"]))
+        with sub_col2:
+            hips = get_num(st.text_input("Hips (Linear Feet)", value=scanned_vals["hips"]))
+            ridges = get_num(st.text_input("Ridges (Linear Feet)", value=scanned_vals["ridges"]))
+            rakes = get_num(st.text_input("Rakes (Linear Feet)", value=scanned_vals["rakes"]))
+            waste_pct = get_num(st.text_input("Waste Factor (%)", value="10"))
 
-        eaves = get_num(st.text_input("Eaves (Linear Feet)", value=scanned_vals["eaves"]))
-        valleys = get_num(st.text_input("Valleys (Linear Feet)", value=scanned_vals["valleys"]))
-
-    with col2:
-        hips = get_num(st.text_input("Hips (Linear Feet)", value=scanned_vals["hips"]))
-        ridges = get_num(st.text_input("Ridges (Linear Feet)", value=scanned_vals["ridges"]))
-        rakes = get_num(st.text_input("Rakes (Linear Feet)", value=scanned_vals["rakes"]))
+        underlayment_roll_size = st.selectbox("Underlayment Roll Size", options=[2, 5, 10], format_func=lambda x: f"{x} SQ roll")
+        drip_edge_length = 10
+        WASTE_FACTOR = 1 + (waste_pct / 100)
+        hip_ridge_lf = hips + ridges
+        underlayment_rolls = math.ceil((sq_count * 1.15) / underlayment_roll_size)
+        valley_sections = math.ceil(valleys / 10) if valleys > 0 else 0
         
-        waste_pct = get_num(st.text_input("Waste Factor (%)", value="10"))
+        if material_type == "Tile":
+            total_squares_with_waste = sq_count * WASTE_FACTOR
+            if job_type == "Re-Roof":
+                pallets_needed = 0.5 if sq_count < 20 else math.ceil((sq_count / 20) * 2) / 2
+            else:
+                pallets_needed = math.ceil(total_squares_with_waste / 2.97)
+            tile_drip_pieces = (math.ceil(eaves / drip_edge_length) if eaves > 0 else 0) + 2
+            birdstop_pieces = (math.ceil(eaves / 10) if eaves > 0 else 0) + 2
+            is_flat_tile = "Flat" in product
+            batten_bundles = math.ceil(sq_count)
+            hip_bundles = 0 if is_flat_tile else math.ceil(hips / 25)
+            ridge_bundles = math.ceil(hip_ridge_lf / 100) if is_flat_tile else math.ceil(ridges / 50)
+        else:
+            total_squares_with_waste = sq_count * WASTE_FACTOR
+            shingle_drip_pieces = (math.ceil((eaves + rakes) / drip_edge_length) if (eaves + rakes) > 0 else 0) + 2
+            field_bundles = math.ceil(total_squares_with_waste * 3)
+            hip_ridge_bundles = math.ceil(hip_ridge_lf / 33) if hip_ridge_lf > 0 else 0
+            starter_bundles = math.ceil(eaves / 100) if eaves > 0 else 0
+            field_nail_boxes = math.ceil(sq_count / 20) if sq_count > 0 else 0
+            eave_nail_boxes  = math.ceil(sq_count / 20) if sq_count > 0 else 0
+            cap_nail_boxes   = math.ceil(sq_count / 20) if sq_count > 0 else 0
 
-    st.markdown("---")
-    st.subheader("Material Options")
-    opt_col1, opt_col2 = st.columns(2)
+# 🖼️ RIGHT PANEL: DOUBLE DOCUMENT VIEWER (ROOFR + ESTIMATE)
+with right_panel:
+    st.subheader("🖼️ Job File Document Matrix")
+    
+    doc_view_col1, doc_view_col2 = st.columns(2)
+    
+    with doc_view_col1:
+        st.markdown("**1. Roofr Schematic Map**")
+        if roofr_preview_image is not None:
+            st.image(roofr_preview_image, use_column_width=True)
+        else:
+            st.caption("Waiting for Roofr Takeoff Report...")
+            
+    with doc_view_col2:
+        st.markdown("**2. Active Supplier Estimate**")
+        if quote_preview_image is not None:
+            st.image(quote_preview_image, use_column_width=True)
+        else:
+            st.caption("Waiting for Distributor Quote file...")
 
-    with opt_col1:
-        underlayment_roll_size = st.selectbox(
-            "Underlayment Roll Size",
-            options=[2, 5, 10],
-            index=0,
-            format_func=lambda x: f"{x} SQ roll ({x * 100} sq ft)"
-        )
+# 📋 BOTTOM ROW: SYSTEM OUTPUT MANIFESTS
+st.markdown("---")
+st.header("2. Calculated Material Order")
 
-    drip_edge_length = 10
+manifest_ready = False
+if material_type == "Mod Bit" and (mod_sq > 0 or (mod_eaves + mod_rakes) > 0):
+    manifest_ready = True
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Cap Sheet Rolls", f"{cap_rolls} Rolls")
+    c2.metric(f"{mod_bit_base_type.split(' (')[0]} Rolls", f"{base_rolls} Rolls")
+    c3.metric("Drip Edge Pieces", f"{mb_drip_pieces} Pcs")
+    
+    descriptions = [f"Polyglass Cap Sheet — {cap_color}", base_description, "Drip Edge (10ft sections, eaves only)"]
+    quantities = [f"{cap_rolls} Rolls (covers {cap_rolls} SQ)", base_quantity_str, f"{mb_drip_pieces} Pieces ({mb_drip_pieces * 10} LF)"]
 
-    # Perimeter Formulas Logic
-    WASTE_FACTOR = 1 + (waste_pct / 100)
-    hip_ridge_lf = hips + ridges
-
-    underlayment_rolls = math.ceil((sq_count * 1.15) / underlayment_roll_size)
-    valley_sections = math.ceil(valleys / 10) if valleys > 0 else 0
-    TILE_SQ_PER_PALLET = 2.97
-
+elif material_type != "Mod Bit" and sq_count > 0:
+    manifest_ready = True
     if material_type == "Tile":
-        total_squares_with_waste = sq_count * WASTE_FACTOR
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric(f"Field SQ (+{waste_pct:.0f}% Waste)", f"{total_squares_with_waste:.1f} SQ")
+        c2.metric("Pallets Needed", f"{pallets_needed:g} Pallets")
+        c3.metric("Underlayment Rolls", f"{underlayment_rolls} Rolls")
+        c4.metric("Hip/Ridge Closures", f"{ridge_bundles} Bundles" if is_flat_tile else f"{hip_bundles} / {ridge_bundles} Bundles")
         
-        if job_type == "Re-Roof":
-            if sq_count < 20:
-                pallets_needed = 0.5
-            else:
-                raw_pallets = sq_count / 20
-                pallets_needed = math.ceil(raw_pallets * 2) / 2
-        else:
-            pallets_needed = math.ceil(total_squares_with_waste / TILE_SQ_PER_PALLET)
-        
-        tile_drip_pieces = (math.ceil(eaves / drip_edge_length) if eaves > 0 else 0) + 2
-        birdstop_pieces = (math.ceil(eaves / 10) if eaves > 0 else 0) + 2
-        is_flat_tile = "Flat" in product
-        batten_bundles = math.ceil(sq_count)
-        
-        if is_flat_tile:
-            hip_bundles = 0
-            ridge_bundles = math.ceil(hip_ridge_lf / 100) if hip_ridge_lf > 0 else 0
-        else:
-            hip_bundles = math.ceil(hips / 25) if hips > 0 else 0
-            ridge_bundles = math.ceil(ridges / 50) if ridges > 0 else 0
+        hip_ridge_desc = ["Hip & Ridge Closures (100 LF/bundle)"] if is_flat_tile else ["Hip Closures (25 LF/bundle)", "Ridge Closures (50 LF/bundle)"]
+        hip_ridge_qty = [f"{ridge_bundles} Bundles"] if is_flat_tile else [f"{hip_bundles} Bundles", f"{ridge_bundles} Bundles"]
+        descriptions = [f"Field Tile: {product}", f"Tile Underlayment ({underlayment_roll_size}-SQ Rolls)", *hip_ridge_desc, "Roof Battens", "Eave Closure / Birdstop", "Drip Edge (eaves only)"]
+        quantities = [f"{pallets_needed:g} Pallets (Breakage)" if job_type == "Re-Roof" else f"{total_squares_with_waste:.1f} SQ ({pallets_needed:g} Pallets)", f"{underlayment_rolls} Rolls", *hip_ridge_qty, f"{batten_bundles} Bundles", f"{birdstop_pieces} Pcs", f"{tile_drip_pieces} Pcs"]
     else:
-        # Shingle Specific Structural Math Breakdown
-        total_squares_with_waste = sq_count * WASTE_FACTOR
-        shingle_drip_pieces = (math.ceil((eaves + rakes) / drip_edge_length) if (eaves + rakes) > 0 else 0) + 2
-        field_bundles = math.ceil(total_squares_with_waste * bundles_per_sq)
-        hip_ridge_bundles = math.ceil(hip_ridge_lf / 33) if hip_ridge_lf > 0 else 0
-        starter_bundles = math.ceil(eaves / 100) if eaves > 0 else 0
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric(f"Field SQ (+{waste_pct:.0f}% Waste)", f"{total_squares_with_waste:.1f} SQ")
+        c2.metric("Field Bundles", f"{field_bundles} Bundles")
+        c3.metric("Underlayment Rolls", f"{underlayment_rolls} Rolls")
+        c4.metric("Hip/Ridge Cap Bundles", f"{hip_ridge_bundles} Bundles")
         
-        # NEW STRUCTURAL FASTENER FORMULAS
-        field_nail_boxes = math.ceil(total_squares_with_waste / 20) if sq_count > 0 else 0
-        eave_nail_boxes  = math.ceil(total_squares_with_waste / 20) if sq_count > 0 else 0
-        cap_nail_boxes   = math.ceil(total_squares_with_waste / 20) if sq_count > 0 else 0
+        descriptions = [f"Field Shingles: {product}", f"Underlayment ({underlayment_roll_size}-SQ Rolls)", "Hip & Ridge Cap", "Starter Strip", "Drip Edge", "Shingle Field Nails", "Eave Coil Nails", "Plastic Cap Nails"]
+        quantities = [f"{field_bundles} Bundles", f"{underlayment_rolls} Rolls", f"{hip_ridge_bundles} Bundles", f"{starter_bundles} Bundles", f"{shingle_drip_pieces} Pcs", f"{field_nail_boxes} Box(es) (Net SQ)", f"{eave_nail_boxes} Box(es) (Net SQ)", f"{cap_nail_boxes} Box(es) (Net SQ)"]
 
-    st.header("2. Calculated Material Order")
-
-    if sq_count > 0:
-        if material_type == "Tile":
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric(f"Field SQ (+{waste_pct:.0f}% Waste)", f"{total_squares_with_waste:.1f} SQ")
-            pallet_label = "Pallets Needed" + (" (Re-Roof)" if job_type == "Re-Roof" else "")
-            c2.metric(pallet_label, f"{pallets_needed:g} Pallets")
-            c3.metric("Underlayment Rolls", f"{underlayment_rolls} Rolls")
-            if is_flat_tile:
-                c4.metric("Hip/Ridge Closures", f"{ridge_bundles} Bundles")
-            else:
-                c4.metric("Hip / Ridge Closures", f"{hip_bundles} / {ridge_bundles} Bundles")
-        else:
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric(f"Field SQ (+{waste_pct:.0f}% Waste)", f"{total_squares_with_waste:.1f} SQ")
-            c2.metric("Field Bundles", f"{field_bundles} Bundles")
-            c3.metric("Underlayment Rolls", f"{underlayment_rolls} Rolls")
-            c4.metric("Hip/Ridge Cap Bundles", f"{hip_ridge_bundles} Bundles")
-
-        st.markdown("### 📋 Detailed Order Manifest")
-
-        if material_type == "Tile":
-            if is_flat_tile:
-                hip_ridge_desc = ["Hip & Ridge Closures (100 LF/bundle)"]
-                hip_ridge_qty  = [f"{ridge_bundles} Bundles  ({hip_ridge_lf:.0f} LF @ 100 LF/bundle)"]
-            else:
-                hip_ridge_desc = ["Hip Closures (25 LF/bundle)", "Ridge Closures (50 LF/bundle)"]
-                hip_ridge_qty = [
-                    f"{hip_bundles} Bundles  ({hips:.0f} LF @ 25 LF/bundle)",
-                    f"{ridge_bundles} Bundles  ({ridges:.0f} LF @ 50 LF/bundle)",
-                ]
-
-            descriptions = [
-                f"Field Tile: {product}",
-                f"Tile Underlayment ({underlayment_roll_size}-SQ Rolls)",
-                *hip_ridge_desc,
-                "Roof Battens (1 bundle/SQ)",
-                "Eave Closure / Birdstop (10ft pieces)",
-                "Drip Edge (10ft sections, eaves only)",
-            ]
-            
-            tile_manifest_label = f"{pallets_needed:g} Pallets (Breakage Allowance)" if job_type == "Re-Roof" else f"{total_squares_with_waste:.1f} SQ  ({pallets_needed:g} pallets @ 2.97 SQ/pallet)"
-            
-            quantities = [
-                tile_manifest_label,
-                f"{underlayment_rolls} Rolls  (covers {underlayment_rolls * underlayment_roll_size} SQ)",
-                *hip_ridge_qty,
-                f"{batten_bundles} Bundles  ({sq_count:.0f} SQ)",
-                f"{birdstop_pieces} Pieces  ({birdstop_pieces * 10} LF)",
-                f"{tile_drip_pieces} Pieces  ({tile_drip_pieces * 10} LF)",
-            ]
-        else:
-            # UPDATED: Appended structural fastener sets to shingle groupings
-            descriptions = [
-                f"Field Shingles: {product}",
-                f"Underlayment ({underlayment_roll_size}-SQ Rolls)",
-                "Hip & Ridge Cap Shingles",
-                "Starter Strip Shingles",
-                "Drip Edge (10ft sections)",
-                "Shingle Field Nails (1-1/4\" Coil)",
-                "Eave Coil Nails (1-3/4\" EG)",
-                "Plastic Cap Nails (1\" Caps)",
-            ]
-            quantities = [
-                f"{total_squares_with_waste:.1f} SQ  ({field_bundles} bundles @ {bundles_per_sq}/SQ)",
-                f"{underlayment_rolls} Rolls  (covers {underlayment_rolls * underlayment_roll_size} SQ)",
-                f"{hip_ridge_bundles} Bundles  ({hip_ridge_bundles * 33} LF)",
-                f"{starter_bundles} Bundles  ({starter_bundles * 100} LF)",
-                f"{shingle_drip_pieces} Pieces  ({shingle_drip_pieces * 10} LF)",
-                f"{field_nail_boxes} Box(es)  ({total_squares_with_waste:.1f} SQ @ 20 SQ/box)",
-                f"{eave_nail_boxes} Box(es)  ({total_squares_with_waste:.1f} SQ @ 20 SQ/box)",
-                f"{cap_nail_boxes} Box(es)  ({total_squares_with_waste:.1f} SQ @ 20 SQ/box)",
-            ]
-
-        if valleys > 0:
-            descriptions.append("Valley Flashing (W-Valley, 10ft sections)")
-            quantities.append(f"{valley_sections} Sections  ({valley_sections * 10} LF)")
-
-        st.table({"Material Description": descriptions, "Calculated Quantity": quantities})
-
-        st.header("3. Actions")
-        job_address = st.text_input("Job Address / Name", placeholder="e.g., Lot 42 - Whispering Pines")
-        crew_notes = st.text_area("Crew / Field Notes", placeholder="e.g., access restrictions...", height=100)
-
-        if st.button("Confirm & Ready to Order"):
-            if job_address:
-                st.success(f"📦 Order Manifest generated for **{job_address}**!")
-            else:
-                st.warning("Please enter a Job Address before confirming.")
-    else:
-        st.info("💡 Enter a Square Count above to generate the material order manifest.")
+if manifest_ready:
+    if material_type != "Mod Bit" and valleys > 0:
+        descriptions.append("Valley Flashing (W-Valley)")
+        quantities.append(f"{valley_sections} Sections")
+        
+    st.table({"Material Description": descriptions, "Calculated Quantity": quantities})
+    
+    st.header("3. Actions")
+    job_address = st.text_input("Job Address / Name", placeholder="e.g., Lot 42 - Whispering Pines")
+    if st.button("Confirm & Ready to Order") and job_address:
+        st.success(f"📦 Order Manifest generated for **{job_address}**!")
+else:
+    st.info("💡 Upload data files or enter sizing values to populate the order manifests.")
