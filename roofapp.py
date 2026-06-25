@@ -280,4 +280,3 @@ else:
         if material_type == "Tile":
             c1, c2, c3, c4 = st.columns(4)
             c1.metric(
-            
