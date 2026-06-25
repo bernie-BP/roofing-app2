@@ -32,8 +32,10 @@ st.write("Drop your job files below to project blueprints and pricing models on 
 # 📋 TWO-FILE UPLOADER HUB
 # ==========================================
 scanned_vals = {"pitched_sq": "", "flat_sq": "", "eaves": "", "valleys": "", "hips": "", "ridges": "", "rakes": ""}
-roofr_preview_image = None
-quote_preview_image = None
+roofr_pages_bytes = None
+quote_pages_bytes = None
+total_roofr_pages = 1
+total_quote_pages = 1
 
 st.header("📋 Automated Document Upload Hub")
 if not PDF_ENGINES_AVAILABLE:
@@ -47,16 +49,15 @@ else:
     with up_col2:
         uploaded_quote = st.file_uploader("2. Upload Estimate / Supplier Quote (PDF)", type=["pdf"])
     
-    # Process File 1: Roofr Takeoff
+    # Process File 1: Roofr Takeoff Text Parsing & Sizing Check
     if uploaded_roofr is not None:
         try:
-            file_bytes_roofr = uploaded_roofr.read()
-            images_roofr = convert_from_bytes(file_bytes_roofr, first_page=1, last_page=1)
-            if images_roofr:
-                roofr_preview_image = images_roofr[0]
-                
+            roofr_pages_bytes = uploaded_roofr.read()
             uploaded_roofr.seek(0)
+            
             reader = pypdf.PdfReader(uploaded_roofr)
+            total_roofr_pages = len(reader.pages)
+            
             full_text = ""
             for page in reader.pages:
                 text_content = page.extract_text()
@@ -95,18 +96,18 @@ else:
             
             st.success("✅ Roofr measurements scanned into left-side configuration controls!")
         except Exception as e:
-            st.error(f"Could not parse Roofr blueprint. Error: {e}")
+            st.error(f"Could not parse Roofr blueprint text. Error: {e}")
 
-    # Process File 2: Distributor Price Quote
+    # Process File 2: Total Page Count Check on Supplier Quote
     if uploaded_quote is not None:
         try:
-            file_bytes_quote = uploaded_quote.read()
-            images_quote = convert_from_bytes(file_bytes_quote, first_page=1, last_page=1)
-            if images_quote:
-                quote_preview_image = images_quote[0]
-            st.success("✅ Supplier material quote generated in right-side split view panel!")
+            quote_pages_bytes = uploaded_quote.read()
+            uploaded_quote.seek(0)
+            reader_quote = pypdf.PdfReader(uploaded_quote)
+            total_quote_pages = len(reader_quote.pages)
+            st.success("✅ Supplier material quote ready for visualization panels!")
         except Exception as e:
-            st.error(f"Could not render estimate document view. Error: {e}")
+            st.error(f"Could not read estimate page indexing. Error: {e}")
 
 st.markdown("---")
 
@@ -186,7 +187,7 @@ with left_panel:
             eave_nail_boxes  = math.ceil(sq_count / 20) if sq_count > 0 else 0
             cap_nail_boxes   = math.ceil(sq_count / 20) if sq_count > 0 else 0
 
-# 🖼️ RIGHT PANEL: DOUBLE DOCUMENT VIEWER (ROOFR + ESTIMATE)
+# 🖼️ RIGHT PANEL: DOUBLE DOCUMENT VIEWER WITH PAGE CONTROLLERS
 with right_panel:
     st.subheader("🖼️ Job File Document Matrix")
     
@@ -194,15 +195,41 @@ with right_panel:
     
     with doc_view_col1:
         st.markdown("**1. Roofr Schematic Map**")
-        if roofr_preview_image is not None:
-            st.image(roofr_preview_image, use_column_width=True)
+        if roofr_pages_bytes is not None:
+            # Dropdown menu to control pages
+            roofr_page_selection = st.selectbox(
+                "Select Roofr Page",
+                options=list(range(1, total_roofr_pages + 1)),
+                format_func=lambda x: f"Page {x} of {total_roofr_pages}",
+                key="roofr_page_selector"
+            )
+            # Render selected image frame dynamically
+            try:
+                images_roofr = convert_from_bytes(roofr_pages_bytes, first_page=roofr_page_selection, last_page=roofr_page_selection)
+                if images_roofr:
+                    st.image(images_roofr[0], use_column_width=True)
+            except Exception as img_err:
+                st.caption("Rendering image page context...")
         else:
             st.caption("Waiting for Roofr Takeoff Report...")
             
     with doc_view_col2:
         st.markdown("**2. Active Supplier Estimate**")
-        if quote_preview_image is not None:
-            st.image(quote_preview_image, use_column_width=True)
+        if quote_pages_bytes is not None:
+            # Dropdown menu to control pages
+            quote_page_selection = st.selectbox(
+                "Select Quote Page",
+                options=list(range(1, total_quote_pages + 1)),
+                format_func=lambda x: f"Page {x} of {total_quote_pages}",
+                key="quote_page_selector"
+            )
+            # Render selected image frame dynamically
+            try:
+                images_quote = convert_from_bytes(quote_pages_bytes, first_page=quote_page_selection, last_page=quote_page_selection)
+                if images_quote:
+                    st.image(images_quote[0], use_column_width=True)
+            except Exception as img_err:
+                st.caption("Rendering image page context...")
         else:
             st.caption("Waiting for Distributor Quote file...")
 
