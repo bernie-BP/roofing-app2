@@ -4,7 +4,16 @@ import os
 
 st.set_page_config(page_title="Roofing Material Calculator", page_icon="🏠", layout="centered")
 
-# Safety Check: Only show the logo if the file actually exists in your repository
+# Helper function to convert empty text strings safely to floats
+def get_num(val):
+    if not val or val.strip() == "":
+        return 0.0
+    try:
+        return float(val.strip())
+    except ValueError:
+        return 0.0
+
+# Safety Check: Only show the logo if the file actually exists
 if os.path.exists("logo.png"):
     st.image("logo.png", width=200)
 
@@ -37,56 +46,59 @@ if material_type == "Mod Bit":
     mb_col1, mb_col2 = st.columns(2)
 
     with mb_col1:
-        mod_sq = st.number_input("Square Count (SQ)", min_value=0.0, step=1.0, help="1 SQ = 100 sq ft")
-        mod_eaves = st.number_input("Eaves (Linear Feet)", min_value=0.0, step=1.0)
-        mod_rakes = st.number_input("Rakes (Linear Feet)", min_value=0.0, step=1.0)
+        mod_sq = get_num(st.text_input("Square Count (SQ)", value="", help="1 SQ = 100 sq ft"))
+        mod_eaves = get_num(st.text_input("Eaves (Linear Feet)", value=""))
+        mod_rakes = get_num(st.text_input("Rakes (Linear Feet)", value=""))
 
     with mb_col2:
         CAPSHEET_COLORS = [
-            "Buff",
-            "Grey Slate",
-            "Black",
-            "Heather Blend",
-            "Chestnut",
-            "Oak",
-            "White",
-            "Red Blend",
-            "Pine Green",
-            "Weatherwood",
+            "Buff", "Grey Slate", "Black", "Heather Blend", 
+            "Chestnut", "Oak", "White", "Red Blend", 
+            "Pine Green", "Weatherwood"
         ]
         cap_color = st.selectbox("Cap Sheet Color", CAPSHEET_COLORS)
+        
+        mod_bit_base_type = st.selectbox(
+            "Select Base Layer Material Type",
+            options=["Base Sheet (2 SQ per roll)", "SAV 9\" Self-Adhered (66 LF per roll)"],
+            help="Choose which product you are using for the base layer to calculate correct rolls."
+        )
 
     st.markdown("---")
 
     # ── Mod Bit Calculations ────────────────────────────────────────────────
     drip_edge_length = 10
     mb_drip_pieces  = (math.ceil(mod_eaves / drip_edge_length) if mod_eaves > 0 else 0) + 2
-    sav_rolls       = math.ceil((mod_eaves + mod_rakes) / 66) if (mod_eaves + mod_rakes) > 0 else 0
-    base_rolls      = math.ceil(mod_sq / 2) if mod_sq > 0 else 0
     cap_rolls       = math.ceil(mod_sq) if mod_sq > 0 else 0
+
+    if mod_bit_base_type == "Base Sheet (2 SQ per roll)":
+        base_rolls = math.ceil(mod_sq / 2) if mod_sq > 0 else 0
+        base_description = "Polyglass Base Sheet"
+        base_quantity_str = f"{base_rolls} Rolls  (covers {base_rolls * 2} SQ)"
+    else:
+        base_rolls = math.ceil((mod_eaves + mod_rakes) / 66) if (mod_eaves + mod_rakes) > 0 else 0
+        base_description = 'Polyglass SAV 9" Self-Adhered (66 LF/roll)'
+        base_quantity_str = f"{base_rolls} Rolls  ({mod_eaves + mod_rakes:.0f} LF @ 66 LF/roll)"
 
     # ── Mod Bit Results ─────────────────────────────────────────────────────
     st.header("2. Calculated Material Order")
 
     if mod_sq > 0 or (mod_eaves + mod_rakes) > 0:
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Base Sheet Rolls", f"{base_rolls} Rolls", help="2 SQ per roll")
-        c2.metric("Cap Sheet Rolls", f"{cap_rolls} Rolls", help="1 SQ per roll")
-        c3.metric('SAV 9" Rolls', f"{sav_rolls} Rolls", help="66 LF per roll")
-        c4.metric("Drip Edge Pieces", f"{mb_drip_pieces} Pcs", help="10ft sections, eaves only")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Cap Sheet Rolls", f"{cap_rolls} Rolls", help="1 SQ per roll")
+        c2.metric(f"{mod_bit_base_type.split(' (')[0]} Rolls", f"{base_rolls} Rolls")
+        c3.metric("Drip Edge Pieces", f"{mb_drip_pieces} Pcs", help="10ft sections, eaves only")
 
         st.markdown("### 📋 Detailed Order Manifest")
 
         descriptions = [
-            "Polyglass Base Sheet",
             f"Polyglass Cap Sheet — {cap_color}",
-            'Polyglass SAV 9" Self-Adhered (66 LF/roll)',
+            base_description,
             "Drip Edge (10ft sections, eaves only)",
         ]
         quantities = [
-            f"{base_rolls} Rolls  (covers {base_rolls * 2} SQ)",
             f"{cap_rolls} Rolls  (covers {cap_rolls} SQ)",
-            f"{sav_rolls} Rolls  ({mod_eaves + mod_rakes:.0f} LF @ 66 LF/roll)",
+            base_quantity_str,
             f"{mb_drip_pieces} Pieces  ({mb_drip_pieces * 10} LF)",
         ]
 
@@ -112,23 +124,21 @@ if material_type == "Mod Bit":
         st.info("💡 Enter a Square Count or linear footage above to generate the material order manifest.")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TILE & SHINGLES — original layout
+# TILE & SHINGLES — Rearranged column logic with empty text inputs
 # ══════════════════════════════════════════════════════════════════════════════
 else:
     col1, col2 = st.columns(2)
 
     with col1:
-        sq_count = st.number_input("Square Count (SQ)", min_value=0.0, step=1.0, help="1 SQ = 100 sq ft")
+        sq_count = get_num(st.text_input("Square Count (SQ)", value="", help="1 SQ = 100 sq ft"))
 
         if material_type == "Tile":
             product = st.selectbox("Tile Type / Profile", [
-                # Eagle profiles
                 "Concrete - Eagle Malibu (S-Profile)",
                 "Concrete - Eagle Capistrano (High Barrel)",
                 "Concrete - Eagle Bel Air (Flat)",
                 "Clay - Eagle Spanish S",
                 "Clay - Eagle Mission Tile",
-                # Westlake profiles
                 "Concrete - Westlake Royal Spanish (S-Profile)",
                 "Concrete - Westlake Hacienda (High Barrel)",
                 "Concrete - Westlake Plana (Flat)",
@@ -137,16 +147,13 @@ else:
             ])
         else:
             GAF_SHINGLES = {
-                # ── Value / 3-Tab ──────────────────────────────────────────────
                 "GAF Royal Sovereign (3-Tab)":                          3,
-                # ── Architectural / Dimensional ────────────────────────────────
                 "GAF Timberline HDZ (Architectural)":                   3,
                 "GAF Timberline UHDZ (Ultra High Definition)":          3,
                 "GAF Timberline CS Cool Series (Architectural)":        3,
                 "GAF Timberline American Harvest (Architectural)":      3,
                 "GAF Timberline Natural Shadow (Architectural)":        3,
                 "GAF Timberline AS II (Architectural)":                 3,
-                # ── Designer / Premium ─────────────────────────────────────────
                 "GAF Grand Canyon (Designer)":                          3,
                 "GAF Slateline (Designer)":                             3,
                 "GAF Woodland (Designer)":                              3,
@@ -160,18 +167,17 @@ else:
             bundles_per_sq = GAF_SHINGLES[product]
             st.caption(f"Coverage rate: **{bundles_per_sq} bundles per square**")
 
-        eaves = st.number_input("Eaves (Linear Feet)", min_value=0.0, step=1.0)
-        rakes = st.number_input("Rakes (Linear Feet)", min_value=0.0, step=1.0)
+        # 1. Eaves & 2. Valleys placed in Column 1
+        eaves = get_num(st.text_input("Eaves (Linear Feet)", value=""))
+        valleys = get_num(st.text_input("Valleys (Linear Feet)", value=""))
 
     with col2:
-        hips = st.number_input("Hips (Linear Feet)", min_value=0.0, step=1.0)
-        ridges = st.number_input("Ridges (Linear Feet)", min_value=0.0, step=1.0)
-        valleys = st.number_input("Valleys (Linear Feet)", min_value=0.0, step=1.0)
-        waste_pct = st.number_input(
-            "Waste Factor (%)",
-            min_value=0.0, max_value=50.0, value=10.0, step=1.0,
-            help="Extra material added to account for cuts and breakage"
-        )
+        # 3. Hips, 4. Ridges, & 5. Rakes placed in Column 2
+        hips = get_num(st.text_input("Hips (Linear Feet)", value=""))
+        ridges = get_num(st.text_input("Ridges (Linear Feet)", value=""))
+        rakes = get_num(st.text_input("Rakes (Linear Feet)", value=""))
+        
+        waste_pct = get_num(st.text_input("Waste Factor (%)", value="10"))
 
     st.markdown("---")
     st.subheader("Material Options")
@@ -187,7 +193,7 @@ else:
             help="Select the roll size your supplier carries"
         )
 
-    drip_edge_length = 10  # Standard 10ft sections from supplier
+    drip_edge_length = 10
 
     # ── Calculations ─────────────────────────────────────────────────────────
     WASTE_FACTOR = 1 + (waste_pct / 100)
@@ -234,16 +240,16 @@ else:
             c1, c2, c3, c4 = st.columns(4)
             c1.metric(f"Field SQ (+{waste_pct:.0f}% Waste)", f"{total_squares_with_waste:.1f} SQ")
             pallet_label = "Pallets Needed" + (" (Re-Roof)" if job_type == "Re-Roof" else "")
-            c2.metric(pallet_label, f"{pallets_needed:g} Pallets", help="2.97 SQ per pallet" + (". +½ pallet for re-roof <20 SQ, +1 pallet for re-roof ≥20 SQ" if job_type == "Re-Roof" else ""))
+            c2.metric(pallet_label, f"{pallets_needed:g} Pallets")
             c3.metric("Underlayment Rolls", f"{underlayment_rolls} Rolls")
             if is_flat_tile:
-                c4.metric("Hip/Ridge Closures", f"{ridge_bundles} Bundles", help="100 LF/bundle")
+                c4.metric("Hip/Ridge Closures", f"{ridge_bundles} Bundles")
             else:
-                c4.metric("Hip / Ridge Closures", f"{hip_bundles} / {ridge_bundles} Bundles", help="Hips: 25 LF/bundle  |  Ridges: 50 LF/bundle")
+                c4.metric("Hip / Ridge Closures", f"{hip_bundles} / {ridge_bundles} Bundles")
         else:
             c1, c2, c3, c4 = st.columns(4)
             c1.metric(f"Field SQ (+{waste_pct:.0f}% Waste)", f"{total_squares_with_waste:.1f} SQ")
-            c2.metric("Field Bundles", f"{field_bundles} Bundles", help=f"{bundles_per_sq} bundles/SQ")
+            c2.metric("Field Bundles", f"{field_bundles} Bundles")
             c3.metric("Underlayment Rolls", f"{underlayment_rolls} Rolls")
             c4.metric("Hip/Ridge Cap Bundles", f"{hip_ridge_bundles} Bundles")
 
@@ -254,10 +260,7 @@ else:
                 hip_ridge_desc = ["Hip & Ridge Closures (100 LF/bundle)"]
                 hip_ridge_qty  = [f"{ridge_bundles} Bundles  ({hip_ridge_lf:.0f} LF @ 100 LF/bundle)"]
             else:
-                hip_ridge_desc = [
-                    "Hip Closures (25 LF/bundle)",
-                    "Ridge Closures (50 LF/bundle)",
-                ]
+                hip_ridge_desc = ["Hip Closures (25 LF/bundle)", "Ridge Closures (50 LF/bundle)"]
                 hip_ridge_qty = [
                     f"{hip_bundles} Bundles  ({hips:.0f} LF @ 25 LF/bundle)",
                     f"{ridge_bundles} Bundles  ({ridges:.0f} LF @ 50 LF/bundle)",
@@ -321,3 +324,4 @@ else:
                 st.warning("Please enter a Job Address before confirming.")
     else:
         st.info("💡 Enter a Square Count above to generate the material order manifest.")
+        
