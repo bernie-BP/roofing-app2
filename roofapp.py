@@ -54,21 +54,25 @@ else:
                     return match.group(1).strip()
                 return ""
 
-            # Target Roofr's specific split layout for Pitched vs Flat areas
-            scanned_vals["pitched_sq"] = parse_metric(r"Pitched\s*Roof\s*Area\s*[:\-]?\s*([\d\.,]+)\s*sq", full_text)
-            scanned_vals["flat_sq"] = parse_metric(r"Flat\s*Roof\s*Area\s*[:\-]?\s*([\d\.,]+)\s*sq", full_text)
+            # Extract raw square footage strings
+            raw_pitched_ft = parse_metric(r"Pitched\s*Roof\s*Area\s*[:\-]?\s*([\d\.,]+)\s*sq", full_text)
+            raw_flat_ft = parse_metric(r"Flat\s*Roof\s*Area\s*[:\-]?\s*([\d\.,]+)\s*sq", full_text)
             
-            # Fallback patterns if written as pure SQ units in report tables
-            if not scanned_vals["pitched_sq"]:
-                scanned_vals["pitched_sq"] = parse_metric(r"Pitched\s*Area\s*[:\-]?\s*([\d\.,]+)\s*SQ", full_text)
-            if not scanned_vals["flat_sq"]:
-                scanned_vals["flat_sq"] = parse_metric(r"Flat\s*Area\s*[:\-]?\s*([\d\.,]+)\s*SQ", full_text)
+            if not raw_pitched_ft:
+                raw_pitched_ft = parse_metric(r"Pitched\s*Area\s*[:\-]?\s*([\d\.,]+)\s*SQ", full_text)
+            if not raw_flat_ft:
+                raw_flat_ft = parse_metric(r"Flat\s*Area\s*[:\-]?\s*([\d\.,]+)\s*SQ", full_text)
             
-            # Universal fallback if no breakdown is found
-            if not scanned_vals["pitched_sq"] and not scanned_vals["flat_sq"]:
-                universal_sq = parse_metric(r"(?:Total Area|Squares)\s*[:\-]?\s*([\d\.,]+)\s*sq", full_text)
-                scanned_vals["pitched_sq"] = universal_sq
-                scanned_vals["flat_sq"] = universal_sq
+            if not raw_pitched_ft and not raw_flat_ft:
+                universal_ft = parse_metric(r"(?:Total Area|Squares)\s*[:\-]?\s*([\d\.,]+)\s*sq", full_text)
+                raw_pitched_ft = universal_ft
+                raw_flat_ft = universal_ft
+
+            # FIXED FORMULA: Convert raw square footage to SQ squares (divide by 100)
+            if raw_pitched_ft:
+                scanned_vals["pitched_sq"] = f"{get_num(raw_pitched_ft) / 100:.1f}"
+            if raw_flat_ft:
+                scanned_vals["flat_sq"] = f"{get_num(raw_flat_ft) / 100:.1f}"
 
             # Standard perimeter lineals
             scanned_vals["eaves"] = parse_metric(r"Eaves\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
@@ -77,9 +81,9 @@ else:
             scanned_vals["ridges"] = parse_metric(r"Ridges?\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
             scanned_vals["rakes"] = parse_metric(r"Rakes\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
             
-            st.success("✅ Roofr measurements scanned! Verify values in the tables below.")
+            st.success("✅ Roofr measurements scanned and converted to SQ! Verify values below.")
         except Exception as e:
-            st.error(f"Could not read PDF structure. Please check the file format. Error: {e}")
+            st.error(f"Could not read PDF structure. Error: {e}")
 
 st.markdown("---")
 
@@ -109,7 +113,7 @@ if material_type == "Mod Bit":
     mb_col1, mb_col2 = st.columns(2)
 
     with mb_col1:
-        mod_sq = get_num(st.text_input("Square Count (SQ)", value=scanned_vals["flat_sq"], help="Calculated using Flat Roof Area values from report"))
+        mod_sq = get_num(st.text_input("Square Count (SQ)", value=scanned_vals["flat_sq"], help="Flat Roof Area converted to Squares (SQ)"))
         mod_eaves = get_num(st.text_input("Eaves (Linear Feet)", value=scanned_vals["eaves"]))
         mod_rakes = get_num(st.text_input("Rakes (Linear Feet)", value=scanned_vals["rakes"]))
 
@@ -183,7 +187,7 @@ else:
     col1, col2 = st.columns(2)
 
     with col1:
-        sq_count = get_num(st.text_input("Square Count (SQ)", value=scanned_vals["pitched_sq"], help="Calculated using Pitched Roof Area values from report"))
+        sq_count = get_num(st.text_input("Square Count (SQ)", value=scanned_vals["pitched_sq"], help="Pitched Roof Area converted to Squares (SQ)"))
 
         if material_type == "Tile":
             product = st.selectbox("Tile Type / Profile", [
