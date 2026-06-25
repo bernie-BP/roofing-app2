@@ -26,16 +26,14 @@ if os.path.exists("logo.png"):
     st.image("logo.png", width=200)
 
 st.title("Roofing Material Ordering Dashboard")
-st.write("Drop your job files below to view blueprints and pricing models on the right while managing parameters on the left.")
+st.write("Drop your job files below to scroll through your blueprints and pricing models seamlessly on the right panel.")
 
 # ==========================================
 # 📋 TWO-FILE UPLOADER HUB
 # ==========================================
-scanned_vals = {"pitched_sq": "", "flat_sq": "", "eaves": "", "valleys": "", "hips": "", "ridges": "", "rakes": ""}
+scanned_vals = {"pitched_sq": "", "flat_sq": "", "eaves": "", "valleys": "", "hips": Tilridges_val := "", "ridges": "", "rakes": ""}
 roofr_pages_bytes = None
 quote_pages_bytes = None
-total_roofr_pages = 1
-total_quote_pages = 1
 
 st.header("📋 Automated Document Upload Hub")
 if not PDF_ENGINES_AVAILABLE:
@@ -49,15 +47,13 @@ else:
     with up_col2:
         uploaded_quote = st.file_uploader("2. Upload Estimate / Supplier Quote (PDF)", type=["pdf"])
     
-    # Process File 1: Roofr Takeoff Text Parsing & Sizing Check
+    # Process File 1: Roofr Takeoff Text Parsing
     if uploaded_roofr is not None:
         try:
             roofr_pages_bytes = uploaded_roofr.read()
             uploaded_roofr.seek(0)
             
             reader = pypdf.PdfReader(uploaded_roofr)
-            total_roofr_pages = len(reader.pages)
-            
             full_text = ""
             for page in reader.pages:
                 text_content = page.extract_text()
@@ -98,16 +94,9 @@ else:
         except Exception as e:
             st.error(f"Could not parse Roofr blueprint text. Error: {e}")
 
-    # Process File 2: Total Page Count Check on Supplier Quote
     if uploaded_quote is not None:
-        try:
-            quote_pages_bytes = uploaded_quote.read()
-            uploaded_quote.seek(0)
-            reader_quote = pypdf.PdfReader(uploaded_quote)
-            total_quote_pages = len(reader_quote.pages)
-            st.success("✅ Supplier material quote ready for visualization panels!")
-        except Exception as e:
-            st.error(f"Could not read estimate page indexing. Error: {e}")
+        quote_pages_bytes = uploaded_quote.read()
+        st.success("✅ Supplier material quote parsed successfully!")
 
 st.markdown("---")
 
@@ -187,49 +176,44 @@ with left_panel:
             eave_nail_boxes  = math.ceil(sq_count / 20) if sq_count > 0 else 0
             cap_nail_boxes   = math.ceil(sq_count / 20) if sq_count > 0 else 0
 
-# 🖼️ RIGHT PANEL: BROWSER-SAFE IMAGE RENDER CORES
+# 🖼 Sey PANEL: SINGLE CONTINUOUS VERTICAL SCROLL CANVAS
 with right_panel:
-    st.subheader("🖼️ Job File Document Matrix")
+    st.subheader("🖼️ Document Reference Panel")
     
-    doc_view_col1, doc_view_col2 = st.columns(2)
+    # Selection toggle widget replacing separate hard split columns
+    view_toggle = st.radio(
+        "Display View Mode",
+        options=["1. Roofr Measurement Blueprint", "2. Active Supplier Estimate"],
+        horizontal=True
+    )
     
-    with doc_view_col1:
-        st.markdown("**1. Roofr Schematic Map**")
-        if roofr_pages_bytes is not None:
-            # Brave-safe page selector
-            roofr_page_selection = st.selectbox(
-                "Go to Page",
-                options=list(range(1, total_roofr_pages + 1)),
-                format_func=lambda x: f"Page {x} of {total_roofr_pages}",
-                key="roofr_page_selector"
-            )
-            try:
-                images_roofr = convert_from_bytes(roofr_pages_bytes, first_page=roofr_page_selection, last_page=roofr_page_selection)
-                if images_roofr:
-                    st.image(images_roofr[0], use_column_width=True)
-            except Exception as img_err:
-                st.caption("Rendering document view...")
+    st.markdown("---")
+    
+    # Vertical scroll engine enclosure box utilizing standard layout columns natively
+    scroll_container = st.container()
+    with scroll_container:
+        if "Roofr" in view_toggle:
+            if roofr_pages_bytes is not None:
+                try:
+                    # Renders all pages sequentially inside a native scroll view format
+                    all_images = convert_from_bytes(roofr_pages_bytes)
+                    for i, page_img in enumerate(all_images):
+                        st.image(page_img, use_column_width=True, caption=f"Roofr Report — Page {i+1}")
+                except Exception as err:
+                    st.caption("Rendering full document layout profile...")
+            else:
+                st.info("💡 Drop a Roofr PDF report into the uploader box at the top to project scroll view components here.")
         else:
-            st.caption("Waiting for Roofr Takeoff Report...")
-            
-    with doc_view_col2:
-        st.markdown("**2. Active Supplier Estimate**")
-        if quote_pages_bytes is not None:
-            # Brave-safe page selector
-            quote_page_selection = st.selectbox(
-                "Go to Page",
-                options=list(range(1, total_quote_pages + 1)),
-                format_func=lambda x: f"Page {x} of {total_quote_pages}",
-                key="quote_page_selector"
-            )
-            try:
-                images_quote = convert_from_bytes(quote_pages_bytes, first_page=quote_page_selection, last_page=quote_page_selection)
-                if images_quote:
-                    st.image(images_quote[0], use_column_width=True)
-            except Exception as img_err:
-                st.caption("Rendering document view...")
-        else:
-            st.caption("Waiting for Distributor Quote file...")
+            if quote_pages_bytes is not None:
+                try:
+                    # Renders all pages sequentially inside a native scroll view format
+                    all_images_quote = convert_from_bytes(quote_pages_bytes)
+                    for i, page_img in enumerate(all_images_quote):
+                        st.image(page_img, use_column_width=True, caption=f"Supplier Quote — Page {i+1}")
+                except Exception as err:
+                    st.caption("Rendering full document layout profile...")
+            else:
+                st.info("💡 Drop a Supplier Estimate PDF file into the uploader box at the top to project scroll view components here.")
 
 # 📋 BOTTOM ROW: SYSTEM OUTPUT MANIFESTS
 st.markdown("---")
@@ -280,3 +264,5 @@ if manifest_ready:
     job_address = st.text_input("Job Address / Name", placeholder="e.g., Lot 42 - Whispering Pines")
     if st.button("Confirm & Ready to Order") and job_address:
         st.success(f"📦 Order Manifest generated for **{job_address}**!")
+else:
+    st.info("💡 Upload data files or enter sizing values to populate the order manifests.")
