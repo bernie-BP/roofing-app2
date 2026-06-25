@@ -1,7 +1,10 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import math
 import os
 import re
+import base64
+from io import BytesIO
 
 # Handle backend PDF graphic engines natively
 try:
@@ -176,7 +179,7 @@ with left_panel:
             eave_nail_boxes  = math.ceil(sq_count / 20) if sq_count > 0 else 0
             cap_nail_boxes   = math.ceil(sq_count / 20) if sq_count > 0 else 0
 
-# 🖼️ RIGHT PANEL: SINGLE CONTINUOUS VERTICAL SCROLL CANVAS
+# 🖼️ RIGHT PANEL: SCROLL BOX IN A FIXED LOCATION (SAFE FROM BRAVE SHIELDS)
 with right_panel:
     st.subheader("🖼️ Document Reference Panel")
     
@@ -188,28 +191,34 @@ with right_panel:
     
     st.markdown("---")
     
-    scroll_container = st.container()
-    with scroll_container:
-        if "Roofr" in view_toggle:
-            if roofr_pages_bytes is not None:
-                try:
-                    all_images = convert_from_bytes(roofr_pages_bytes)
-                    for i, page_img in enumerate(all_images):
-                        st.image(page_img, use_column_width=True, caption=f"Roofr Report — Page {i+1}")
-                except Exception as err:
-                    st.caption("Rendering full document layout profile...")
-            else:
-                st.info("💡 Drop a Roofr PDF report into the uploader box at the top to project scroll view components here.")
-        else:
-            if quote_pages_bytes is not None:
-                try:
-                    all_images_quote = convert_from_bytes(quote_pages_bytes)
-                    for i, page_img in enumerate(all_images_quote):
-                        st.image(page_img, use_column_width=True, caption=f"Supplier Quote — Page {i+1}")
-                except Exception as err:
-                    st.caption("Rendering full document layout profile...")
-            else:
-                st.info("💡 Drop a Supplier Estimate PDF file into the uploader box at the top to project scroll view components here.")
+    # Render logic that aggregates all pages into a fixed-height scrollbox element
+    target_bytes = roofr_pages_bytes if "Roofr" in view_toggle else quote_pages_bytes
+    label_tag = "Roofr Takeoff Blueprint" if "Roofr" in view_toggle else "Supplier Material Quote"
+    
+    if target_bytes is not None:
+        try:
+            with st.spinner("Compiling scroll viewport layout..."):
+                all_images = convert_from_bytes(target_bytes)
+                html_content = '<div style="height: 750px; overflow-y: scroll; border: 2px solid #4A5568; border-radius: 8px; padding: 10px; background-color: #1A202C;">'
+                
+                # Turn each page into a web-safe Base64 image string so it stays bundled inside the component container
+                for i, page_img in enumerate(all_images):
+                    buffered = BytesIO()
+                    page_img.save(buffered, format="JPEG")
+                    img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
+                    html_content += f'<div style="text-align: center; margin-bottom: 20px;">'
+                    html_content += f'<p style="color: #A0AEC0; font-family: sans-serif; font-size: 14px;">📄 {label_tag} — Page {i+1}</p>'
+                    html_content += f'<img src="data:image/jpeg;base64,{img_base64}" style="width: 100%; max-width: 800px; border-radius: 4px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">'
+                    html_content += f'</div>'
+                    
+                html_content += '</div>'
+                
+                # Display the compiled scroll window
+                components.html(html_content, height=770, scrolling=False)
+        except Exception as err:
+            st.caption("Rendering continuous visual frame profile...")
+    else:
+        st.info(f"💡 Drop your PDF files into the uploader matrix above to lock and load the scrollable window for this document.")
 
 # 📋 BOTTOM ROW: SYSTEM OUTPUT MANIFESTS
 st.markdown("---")
