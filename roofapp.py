@@ -3,7 +3,6 @@ import math
 
 st.set_page_config(page_title="Roofing Material Calculator", page_icon="🏠", layout="centered")
 
-st.image("logo.png", width=200)
 st.title("Roofing Material Ordering Dashboard")
 st.write("Enter the job measurements below to automatically calculate required materials.")
 
@@ -68,7 +67,7 @@ if material_type == "Mod Bit":
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Base Sheet Rolls", f"{base_rolls} Rolls", help="2 SQ per roll")
         c2.metric("Cap Sheet Rolls", f"{cap_rolls} Rolls", help="1 SQ per roll")
-        c3.metric("SAV 9" Rolls", f"{sav_rolls} Rolls", help="66 LF per roll")
+        c3.metric('SAV 9" Rolls', f"{sav_rolls} Rolls", help="66 LF per roll")
         c4.metric("Drip Edge Pieces", f"{mb_drip_pieces} Pcs", help="10ft sections, eaves only")
 
         st.markdown("### 📋 Detailed Order Manifest")
