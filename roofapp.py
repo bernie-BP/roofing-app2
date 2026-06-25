@@ -124,7 +124,7 @@ if material_type == "Mod Bit":
         st.info("💡 Enter a Square Count or linear footage above to generate the material order manifest.")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TILE & SHINGLES — Rearranged column logic with empty text inputs
+# TILE & SHINGLES — Layout
 # ══════════════════════════════════════════════════════════════════════════════
 else:
     col1, col2 = st.columns(2)
@@ -134,16 +134,12 @@ else:
 
         if material_type == "Tile":
             product = st.selectbox("Tile Type / Profile", [
-                "Concrete - Eagle Malibu (S-Profile)",
-                "Concrete - Eagle Capistrano (High Barrel)",
-                "Concrete - Eagle Bel Air (Flat)",
-                "Clay - Eagle Spanish S",
-                "Clay - Eagle Mission Tile",
-                "Concrete - Westlake Royal Spanish (S-Profile)",
-                "Concrete - Westlake Hacienda (High Barrel)",
-                "Concrete - Westlake Plana (Flat)",
-                "Clay - Westlake Spanish S",
-                "Clay - Westlake Mission Tile",
+                "Eagle (S-Profile)",
+                "Eagle (W-Profile)",
+                "Eagle (Flat)",
+                "Westlake (S-Profile)",
+                "Westlake (W-Profile)",
+                "Westlake (Flat)"
             ])
         else:
             GAF_SHINGLES = {
@@ -216,7 +212,9 @@ else:
         
         tile_drip_pieces = (math.ceil(eaves / drip_edge_length) if eaves > 0 else 0) + 2
         birdstop_pieces = (math.ceil(eaves / 10) if eaves > 0 else 0) + 2
-        is_flat_tile = "Flat" in product or "Plana" in product
+        
+        is_flat_tile = "Flat" in product
+        
         batten_bundles = math.ceil(sq_count)
         if is_flat_tile:
             hip_bundles = 0
@@ -224,7 +222,6 @@ else:
         else:
             hip_bundles = math.ceil(hips / 25) if hips > 0 else 0
             ridge_bundles = math.ceil(ridges / 50) if ridges > 0 else 0
-        rake_trim_pieces = math.ceil(rakes / 10) if rakes > 0 else 0
     else:
         total_squares_with_waste = sq_count * WASTE_FACTOR
         shingle_drip_pieces = (math.ceil((eaves + rakes) / drip_edge_length) if (eaves + rakes) > 0 else 0) + 2
@@ -266,6 +263,7 @@ else:
                     f"{ridge_bundles} Bundles  ({ridges:.0f} LF @ 50 LF/bundle)",
                 ]
 
+            # MODIFIED: Removed item #7 (Rake Trim / Gabled Edge Flashings)
             descriptions = [
                 f"Field Tile: {product}",
                 f"Tile Underlayment ({underlayment_roll_size}-SQ Rolls)",
@@ -273,7 +271,6 @@ else:
                 "Roof Battens (1 bundle/SQ)",
                 "Eave Closure / Birdstop (10ft pieces)",
                 "Drip Edge (10ft sections, eaves only)",
-                "Rake Trim / Gabled Edge Flashings (10ft sections)",
             ]
             quantities = [
                 f"{total_squares_with_waste:.1f} SQ  ({pallets_needed:g} pallets @ 2.97 SQ/pallet)",
@@ -282,7 +279,6 @@ else:
                 f"{batten_bundles} Bundles  ({sq_count:.0f} SQ)",
                 f"{birdstop_pieces} Pieces  ({birdstop_pieces * 10} LF)",
                 f"{tile_drip_pieces} Pieces  ({tile_drip_pieces * 10} LF)",
-                f"{rake_trim_pieces} Pieces  ({rake_trim_pieces * 10} LF)",
             ]
         else:
             descriptions = [
@@ -324,3 +320,4 @@ else:
                 st.warning("Please enter a Job Address before confirming.")
     else:
         st.info("💡 Enter a Square Count above to generate the material order manifest.")
+    
