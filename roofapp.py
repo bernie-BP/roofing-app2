@@ -361,11 +361,12 @@ if manifest_ready:
                             "item_type": "material"
                         })
                     
-                    # 📑 RESTRUCTURED PAYLOAD: Created via the core financial documents pipeline parameters
+                    # 📑 Unified Estimate structure setup that maps natively into your verification flow
                     payload = {
+                        "name": f"Material Order Layout - PO {final_po}",
                         "related": [job_number],
                         "status": 1, 
-                        "document_type": 8,  # Native identifier system tag for a Material Order
+                        "type": "estimate",  
                         "po_number": final_po,       
                         "internal_note": f"CONTRACTED SPECS -- Tile: {final_tile} | Birdstop Color: {final_birdstop} | Drip Edge Color: {final_drip}. Field Instructions: {crew_notes.strip()}",
                         "items": line_items_api
@@ -376,11 +377,11 @@ if manifest_ready:
                         "Content-Type": "application/json"
                     }
                     
-                    # 🎯 CORRECTED PATHWAY: Pushed via the documents management table endpoint
-                    response = requests.post("https://app.jobnimbus.com/api1/documents", json=payload, headers=headers)
+                    # 🎯 Routed cleanly to the accessible Estimates endpoint
+                    response = requests.post("https://app.jobnimbus.com/api1/estimates", json=payload, headers=headers)
                     
                     if response.status_code in [200, 201]:
-                        st.success(f"🚀 Success! Material Order successfully generated for Job **#{job_number}** with PO **{final_po}** inside JobNimbus.")
+                        st.success(f"🚀 Success! Material Order draft successfully created under Job **#{job_number}**. Open it inside JobNimbus and select 'Convert to Material Order' to finalize!")
                     else:
                         st.error(f"❌ JobNimbus API rejected this order formatting. Error Code: {response.status_code}. Details: {response.text}")
                 except Exception as err:
