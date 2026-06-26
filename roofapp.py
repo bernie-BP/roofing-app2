@@ -344,7 +344,12 @@ if manifest_ready:
 
     # 🚀 LIVE CRM INJECTION GATEWAY (Unified Financial Object Endpoint)
     if st.button("Confirm & Push Material Order inside JobNimbus"):
-        if job_address and JN_TOKEN:
+        # Explicit granular data checks
+        if not job_address:
+            st.error("⚠️ The 'Job Address / Name Confirmation' input field is empty. Please enter the customer record string exactly as it appears in JobNimbus.")
+        elif not JN_TOKEN:
+            st.error("⚠️ Your 'JOBNIMBUS_TOKEN' is missing or completely blank inside your Streamlit App Secrets panel. Please check your spelling.")
+        else:
             with st.spinner("Injecting manifest items directly to your JobNimbus file..."):
                 try:
                     line_items_api = []
@@ -360,7 +365,7 @@ if manifest_ready:
                     payload = {
                         "related": [job_address],
                         "status": 1, 
-                        "type": "materialorder",  # Fixed: strict native lowercase format name
+                        "type": "materialorder",  # Strict lowercase layout match format
                         "po_number": final_po,       
                         "internal_note": f"CONTRACTED SPECS -- Tile: {final_tile} | Birdstop Color: {final_birdstop} | Drip Edge Color: {final_drip}. Field Instructions: {crew_notes.strip()}",
                         "items": line_items_api
@@ -371,17 +376,14 @@ if manifest_ready:
                         "Content-Type": "application/json"
                     }
                     
-                    # Fixed: Routed cleanly back through the unified creation pipeline endpoint
                     response = requests.post("https://app.jobnimbus.com/api1/estimates", json=payload, headers=headers)
                     
                     if response.status_code in [200, 201]:
                         st.success(f"🚀 Success! Material Order successfully generated for **{job_address}** with PO **{final_po}** inside JobNimbus.")
                     else:
-                        st.warning(f"Network linked, but JobNimbus rejected structural formatting. Error Code: {response.status_code}")
+                        st.error(f"❌ JobNimbus API rejected this order formatting. Error Code: {response.status_code}. Details: {response.text}")
                 except Exception as err:
                     st.error(f"Could not reach JobNimbus cloud database servers. Error: {err}")
-        else:
-            st.warning("⚠️ Enter a Job Address or ensure your JOBNIMBUS_TOKEN is activated inside your Streamlit App Secrets.")
 else:
     st.info("💡 Drop a takeoff report into the hub at the top of the page to populate the order manifests.")
-    
+            
