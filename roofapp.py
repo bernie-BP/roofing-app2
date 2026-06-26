@@ -21,7 +21,7 @@ st.set_page_config(page_title="RealRoofing MO Dashboard", page_icon="🏠", layo
 
 # Fetch secure tokens from Streamlit configuration vault
 JN_TOKEN = st.secrets.get("JOBNIMBUS_TOKEN", "")
-OPENAI_KEY = st.secrets.get("OPENAI_API_KEY", "")
+GEMINI_KEY = st.secrets.get("GEMINI_API_KEY", "")
 
 def get_num(val):
     if not val or str(val).strip() == "":
@@ -48,14 +48,12 @@ def cached_pdf_to_html_viewport(target_bytes, label_tag):
     return html_content
 
 def ask_ai_to_extract_contract_metadata(contract_text):
-    """Sends raw homeowner contract text to an AI model to extract customer selections."""
-    if not OPENAI_KEY:
+    """Sends raw homeowner contract text to Google Gemini API to extract customer selections."""
+    if not GEMINI_KEY:
         return {"po": "", "tile_type": "", "birdstop": "Black", "drip_edge": "White"}
     
-    headers = {
-        "Authorization": f"Bearer {OPENAI_KEY}",
-        "Content-Type": "application/json"
-    }
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
+    headers = {"Content-Type": "application/json"}
     
     prompt = f"""
     You are a professional roofing production assistant. Analyze the following text extracted from a signed homeowner contract and extract the construction selections accurately:
@@ -65,25 +63,27 @@ def ask_ai_to_extract_contract_metadata(contract_text):
     4. Drip Edge Color selected by the customer (e.g., White, Bronze, Charcoal, Black)
 
     Return ONLY a valid JSON object with the exact keys: "po", "tile_type", "birdstop", "drip_edge". 
-    Do not include any markdown wrap like ```json or regular prose.
+    Do not include any markdown wrappers like backticks or regular prose.
     
     Contract Text Document Content:
-    {contract_text[:5000]}
+    {contract_text[:6000]}
     """
     
+    payload = {
+        "contents": [{
+            "parts": [{"text": prompt}]
+        }],
+        "generationConfig": {
+            "responseMimeType": "application/json"
+        }
+    }
+    
     try:
-        response = requests.post(
-            "[https://api.openai.com/v1/chat/completions](https://api.openai.com/v1/chat/completions)",
-            headers=headers,
-            json={
-                "model": "gpt-4o-mini",
-                "response_format": { "type": "json_object" },
-                "messages": [{"role": "user", "content": prompt}]
-            },
-            timeout=12
-        )
+        response = requests.post(url, headers=headers, json=payload, timeout=12)
         if response.status_code == 200:
-            return json.loads(response.json()["choices"][0]["message"]["content"])
+            res_json = response.json()
+            text_response = res_json["candidates"][0]["content"]["parts"][0]["text"]
+            return json.loads(text_response)
     except Exception:
         pass
     return {"po": "", "tile_type": "", "birdstop": "Black", "drip_edge": "White"}
@@ -167,7 +167,7 @@ else:
             except Exception as e:
                 st.error(f"Could not parse Roofr blueprint text. Error: {e}")
 
-    # 🤖 AI CUSTOMER CONTRACT PROCESSING GATEWAY
+    # 🤖 AI CUSTOMER CONTRACT PROCESSING GATEWAY (Gemini Powered)
     if uploaded_contract is not None:
         contract_pages_bytes = uploaded_contract.getvalue()
         current_contract_hash = f"{uploaded_contract.name}_{len(contract_pages_bytes)}"
@@ -371,7 +371,7 @@ if manifest_ready:
                         "Content-Type": "application/json"
                     }
                     
-                    response = requests.post("[https://app.jobnimbus.com/api1/estimates](https://app.jobnimbus.com/api1/estimates)", json=payload, headers=headers)
+                    response = requests.post("https://app.jobnimbus.com/api1/estimates", json=payload, headers=headers)
                     
                     if response.status_code in [200, 201]:
                         st.success(f"🚀 Success! Material Order successfully generated for **{job_address}** with PO **{final_po}** inside JobNimbus.")
