@@ -88,6 +88,32 @@ def ask_ai_to_extract_contract_metadata(contract_text):
         pass
     return {"po": "", "tile_type": "", "birdstop": "Black", "drip_edge": "White"}
 
+# --- 🔍 AUTO-RESOLVE HUMAN JOB NUMBER TO SYSTEM JNID TOKEN ---
+def lookup_internal_jnid(job_num_str, headers):
+    """Quietly scans CRM directory indexes to grab the real 16-character string token."""
+    cleaned_num = str(job_num_str).strip()
+    # If the user typed the actual internal token direct (contains an underscore), bypass lookup
+    if "_" in cleaned_num and len(cleaned_num) >= 12:
+        return cleaned_num
+        
+    try:
+        # Check active jobs array index first
+        j_res = requests.get("https://app.jobnimbus.com/api1/jobs?size=200", headers=headers, timeout=8)
+        if j_res.status_code == 200:
+            for record in j_res.json().get("results", []):
+                if str(record.get("number", "")).strip() == cleaned_num or str(record.get("recid", "")).strip() == cleaned_num:
+                    return record.get("jnid")
+                    
+        # Check fallback contact records index if jobs didn't return a match
+        c_res = requests.get("https://app.jobnimbus.com/api1/contacts?size=200", headers=headers, timeout=8)
+        if c_res.status_code == 200:
+            for record in c_res.json().get("results", []):
+                if str(record.get("number", "")).strip() == cleaned_num or str(record.get("recid", "")).strip() == cleaned_num:
+                    return record.get("jnid")
+    except Exception:
+        pass
+    return None
+
 # --- 🧠 STATE MANAGEMENT INITIALIZATION ---
 if "scanned_vals" not in st.session_state:
     st.session_state.scanned_vals = {"pitched_sq": "0.0", "flat_sq": "0.0", "eaves": "0.0", "valleys": "0.0", "hips": "0.0", "ridges": "0.0", "rakes": "0.0"}
@@ -342,49 +368,56 @@ if manifest_ready:
     job_number = st.text_input("Job # (JobNimbus System Match)", placeholder="e.g., 10425")
     crew_notes = st.text_area("Production / Delivery Notes", placeholder="e.g., alley drop-off, roof loaded...", height=100)
 
-    # 🚀 LIVE CRM INJECTION GATEWAY (Unified Documents Pipeline Engine)
+    # 🚀 LIVE CRM INJECTION GATEWAY
     if st.button("Confirm & Push Material Order inside JobNimbus"):
         if not job_number:
-            st.error("⚠️ The 'Job #' input field is empty. Please enter the numerical job ID or JNID reference string.")
+            st.error("⚠️ The 'Job #' input field is empty. Please enter your sequential Job ID number.")
         elif not JN_TOKEN:
             st.error("⚠️ Your 'JOBNIMBUS_TOKEN' is missing or completely blank inside your Streamlit App Secrets panel.")
         else:
-            with st.spinner("Injecting manifest items directly to your JobNimbus file..."):
-                try:
-                    line_items_api = []
-                    for desc, qty in zip(descriptions, quantities):
-                        extracted_qty = float(re.findall(r"[-+]?\d*\.\d+|\d+", qty)[0]) if re.findall(r"[-+]?\d*\.\d+|\d+", qty) else 1.0
-                        line_items_api.append({
-                            "name": desc,
-                            "description": f"Calculated by RealRoofing Assistant Engine. Profile Selection: {final_tile}.",
-                            "quantity": extracted_qty,
-                            "item_type": "material"
-                        })
-                    
-                    # 📑 Unified Estimate structure setup that maps natively into your verification flow
-                    payload = {
-                        "name": f"Material Order Layout - PO {final_po}",
-                        "related": [job_number],
-                        "status": 1, 
-                        "type": "estimate",  
-                        "po_number": final_po,       
-                        "internal_note": f"CONTRACTED SPECS -- Tile: {final_tile} | Birdstop Color: {final_birdstop} | Drip Edge Color: {final_drip}. Field Instructions: {crew_notes.strip()}",
-                        "items": line_items_api
-                    }
-                    
-                    headers = {
-                        "Authorization": f"Bearer {JN_TOKEN}",
-                        "Content-Type": "application/json"
-                    }
-                    
-                    # 🎯 Routed cleanly to the accessible Estimates endpoint
-                    response = requests.post("https://app.jobnimbus.com/api1/estimates", json=payload, headers=headers)
-                    
-                    if response.status_code in [200, 201]:
-                        st.success(f"🚀 Success! Material Order draft successfully created under Job **#{job_number}**. Open it inside JobNimbus and select 'Convert to Material Order' to finalize!")
-                    else:
-                        st.error(f"❌ JobNimbus API rejected this order formatting. Error Code: {response.status_code}. Details: {response.text}")
-                except Exception as err:
-                    st.error(f"Could not reach JobNimbus cloud database servers. Error: {err}")
+            headers = {
+                "Authorization": f"Bearer {JN_TOKEN}",
+                "Content-Type": "application/json"
+            }
+            
+            with st.spinner("Searching JobNimbus indexes for verification token..."):
+                # Quietly lookup the internal system token string based on what they typed
+                resolved_jnid = lookup_internal_jnid(job_number, headers)
+                
+            if not resolved_jnid:
+                st.error(f"❌ Could not find an active file matching Job #{job_number} inside your JobNimbus database. Make sure that job number is completely accurate inside your CRM boards.")
+            else:
+                with st.spinner("Injecting manifest items directly to your JobNimbus file..."):
+                    try:
+                        line_items_api = []
+                        for desc, qty in zip(descriptions, quantities):
+                            extracted_qty = float(re.findall(r"[-+]?\d*\.\d+|\d+", qty)[0]) if re.findall(r"[-+]?\d*\.\d+|\d+", qty) else 1.0
+                            line_items_api.append({
+                                "name": desc,
+                                "description": f"Calculated by RealRoofing Assistant Engine. Profile Selection: {final_tile}.",
+                                "quantity": extracted_qty,
+                                "item_type": "material"
+                            })
+                        
+                        # 📑 Structurally aligned payload with all mandated structural validation inputs
+                        payload = {
+                            "name": f"Material Order Layout - PO {final_po}",
+                            "related": [resolved_jnid], # Passes the verified 16-character tracking identifier token
+                            "status": 1, 
+                            "type": "estimate",  
+                            "record_type_name": "Estimate", # Strictly required schema parameter to satisfy API requirements
+                            "po_number": final_po,       
+                            "internal_note": f"CONTRACTED SPECS -- Tile: {final_tile} | Birdstop Color: {final_birdstop} | Drip Edge Color: {final_drip}. Field Instructions: {crew_notes.strip()}",
+                            "items": line_items_api
+                        }
+                        
+                        response = requests.post("https://app.jobnimbus.com/api1/estimates", json=payload, headers=headers)
+                        
+                        if response.status_code in [200, 201]:
+                            st.success(f"🚀 Success! Material Order draft successfully created under Job **#{job_number}**. Open it inside JobNimbus and select 'Convert to Material Order' to finalize!")
+                        else:
+                            st.error(f"❌ JobNimbus API rejected this order formatting. Error Code: {response.status_code}. Details: {response.text}")
+                    except Exception as err:
+                        st.error(f"Could not reach JobNimbus cloud database servers. Error: {err}")
 else:
     st.info("💡 Drop a takeoff report into the hub at the top of the page to populate the order manifests.")
