@@ -384,3 +384,4 @@ if manifest_ready:
             st.warning("⚠️ Enter a Job Address or ensure your JOBNIMBUS_TOKEN is activated inside your Streamlit App Secrets.")
 else:
     st.info("💡 Drop a takeoff report into the hub at the top of the page to populate the order manifests.")
+    
