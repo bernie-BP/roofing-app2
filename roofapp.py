@@ -339,14 +339,13 @@ if manifest_ready:
     st.table({"Material Item Description": descriptions, "Calculated Quantity": quantities})
     
     st.header("3. Actions")
-    # 🎯 TRANSITIONED FROM ADDRESS STRINGS TO CLEAN JOB # STRINGS
-    job_number = st.text_input("Job # (JobNimbus System Match)", placeholder="e.g., 10425 or jn-1a2b3c")
+    job_number = st.text_input("Job # (JobNimbus System Match)", placeholder="e.g., 10425")
     crew_notes = st.text_area("Production / Delivery Notes", placeholder="e.g., alley drop-off, roof loaded...", height=100)
 
-    # 🚀 LIVE CRM INJECTION GATEWAY
+    # 🚀 LIVE CRM INJECTION GATEWAY (Unified Documents Pipeline Engine)
     if st.button("Confirm & Push Material Order inside JobNimbus"):
         if not job_number:
-            st.error("⚠️ The 'Job #' input field is empty. Please enter the numerical job ID or JNID reference string to route this layout.")
+            st.error("⚠️ The 'Job #' input field is empty. Please enter the numerical job ID or JNID reference string.")
         elif not JN_TOKEN:
             st.error("⚠️ Your 'JOBNIMBUS_TOKEN' is missing or completely blank inside your Streamlit App Secrets panel.")
         else:
@@ -362,10 +361,11 @@ if manifest_ready:
                             "item_type": "material"
                         })
                     
+                    # 📑 RESTRUCTURED PAYLOAD: Created via the core financial documents pipeline parameters
                     payload = {
-                        "related": [job_number], # Maps the order directly to the clean job ID string
+                        "related": [job_number],
                         "status": 1, 
-                        "type": "materialorder",  
+                        "document_type": 8,  # Native identifier system tag for a Material Order
                         "po_number": final_po,       
                         "internal_note": f"CONTRACTED SPECS -- Tile: {final_tile} | Birdstop Color: {final_birdstop} | Drip Edge Color: {final_drip}. Field Instructions: {crew_notes.strip()}",
                         "items": line_items_api
@@ -376,7 +376,8 @@ if manifest_ready:
                         "Content-Type": "application/json"
                     }
                     
-                    response = requests.post("https://app.jobnimbus.com/api1/estimates", json=payload, headers=headers)
+                    # 🎯 CORRECTED PATHWAY: Pushed via the documents management table endpoint
+                    response = requests.post("https://app.jobnimbus.com/api1/documents", json=payload, headers=headers)
                     
                     if response.status_code in [200, 201]:
                         st.success(f"🚀 Success! Material Order successfully generated for Job **#{job_number}** with PO **{final_po}** inside JobNimbus.")
