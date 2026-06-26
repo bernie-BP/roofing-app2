@@ -342,7 +342,7 @@ if manifest_ready:
     job_address = st.text_input("Job Address / Name Confirmation (JobNimbus Match)", placeholder="e.g., Smith - 123 Main St")
     crew_notes = st.text_area("Production / Delivery Notes", placeholder="e.g., alley drop-off, roof loaded...", height=100)
 
-    # 🚀 LIVE CRM INJECTION GATEWAY (Direct Material Order Target)
+    # 🚀 LIVE CRM INJECTION GATEWAY (Unified Financial Object Endpoint)
     if st.button("Confirm & Push Material Order inside JobNimbus"):
         if job_address and JN_TOKEN:
             with st.spinner("Injecting manifest items directly to your JobNimbus file..."):
@@ -360,7 +360,7 @@ if manifest_ready:
                     payload = {
                         "related": [job_address],
                         "status": 1, 
-                        "type": "material_order",  
+                        "type": "materialorder",  # Fixed: strict native lowercase format name
                         "po_number": final_po,       
                         "internal_note": f"CONTRACTED SPECS -- Tile: {final_tile} | Birdstop Color: {final_birdstop} | Drip Edge Color: {final_drip}. Field Instructions: {crew_notes.strip()}",
                         "items": line_items_api
@@ -371,8 +371,8 @@ if manifest_ready:
                         "Content-Type": "application/json"
                     }
                     
-                    # 🎯 Targeted directly to materialorders endpoint
-                    response = requests.post("https://app.jobnimbus.com/api1/materialorders", json=payload, headers=headers)
+                    # Fixed: Routed cleanly back through the unified creation pipeline endpoint
+                    response = requests.post("https://app.jobnimbus.com/api1/estimates", json=payload, headers=headers)
                     
                     if response.status_code in [200, 201]:
                         st.success(f"🚀 Success! Material Order successfully generated for **{job_address}** with PO **{final_po}** inside JobNimbus.")
