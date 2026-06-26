@@ -4,9 +4,11 @@ import math
 import os
 import re
 import base64
+import requests
+import json
 from io import BytesIO
 
-# Handle backend PDF graphic engines natively
+# Handle backend PDF graphic engines safely
 try:
     import pypdf
     from pdf2image import convert_from_bytes
@@ -15,7 +17,11 @@ except ImportError:
     PDF_ENGINES_AVAILABLE = False
 
 # Wide layout configuration to give ample space for the split panel view
-st.set_page_config(page_title="Roofing Material Calculator", page_icon="🏠", layout="wide")
+st.set_page_config(page_title="RealRoofing MO Dashboard", page_icon="🏠", layout="wide")
+
+# Fetch secure tokens from Streamlit configuration vault
+JN_TOKEN = st.secrets.get("JOBNIMBUS_TOKEN", "")
+OPENAI_KEY = st.secrets.get("OPENAI_API_KEY", "")
 
 def get_num(val):
     if not val or str(val).strip() == "":
@@ -25,81 +31,163 @@ def get_num(val):
     except ValueError:
         return 0.0
 
+# --- 🚀 CACHING PERFORMANCE ENGINE ---
+@st.cache_data(show_spinner=False)
+def cached_pdf_to_html_viewport(target_bytes, label_tag):
+    """Converts PDF pages to base64 images once and caches the result to prevent UI stutter."""
+    if not target_bytes:
+        return ""
+    all_images = convert_from_bytes(target_bytes)
+    html_content = '<div style="height: 750px; overflow-y: scroll; border: 2px solid #4A5568; border-radius: 8px; padding: 10px; background-color: #1A202C;">'
+    for i, page_img in enumerate(all_images):
+        buffered = BytesIO()
+        page_img.save(buffered, format="JPEG")
+        img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
+        html_content += f'<div style="text-align: center; margin-bottom: 20px;"><p style="color: #A0AEC0; font-family: sans-serif; font-size: 14px;">📄 {label_tag} — Page {i+1}</p><img src="data:image/jpeg;base64,{img_base64}" style="width: 100%; max-width: 800px; border-radius: 4px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);"></div>'
+    html_content += '</div>'
+    return html_content
+
+def ask_ai_to_extract_contract_metadata(contract_text):
+    """Sends raw homeowner contract text to an AI model to extract customer selections."""
+    if not OPENAI_KEY:
+        return {"po": "", "tile_type": "", "birdstop": "Black", "drip_edge": "White"}
+    
+    headers = {
+        "Authorization": f"Bearer {OPENAI_KEY}",
+        "Content-Type": "application/json"
+    }
+    
+    prompt = f"""
+    You are a professional roofing production assistant. Analyze the following text extracted from a signed homeowner contract and extract the construction selections accurately:
+    1. Customer Name or Job Reference Name (To be used as the PO Number)
+    2. Specific Tile Profile, Brand, or Shingle Style chosen (e.g., Eagle Flat, Westlake S-Profile, GAF HDZ)
+    3. Birdstop Color specified (e.g., Black, Terracotta, Brown, Grey)
+    4. Drip Edge Color selected by the customer (e.g., White, Bronze, Charcoal, Black)
+
+    Return ONLY a valid JSON object with the exact keys: "po", "tile_type", "birdstop", "drip_edge". 
+    Do not include any markdown wrap like ```json or regular prose.
+    
+    Contract Text Document Content:
+    {contract_text[:5000]}
+    """
+    
+    try:
+        response = requests.post(
+            "[https://api.openai.com/v1/chat/completions](https://api.openai.com/v1/chat/completions)",
+            headers=headers,
+            json={
+                "model": "gpt-4o-mini",
+                "response_format": { "type": "json_object" },
+                "messages": [{"role": "user", "content": prompt}]
+            },
+            timeout=12
+        )
+        if response.status_code == 200:
+            return json.loads(response.json()["choices"][0]["message"]["content"])
+    except Exception:
+        pass
+    return {"po": "", "tile_type": "", "birdstop": "Black", "drip_edge": "White"}
+
+# --- 🧠 STATE MANAGEMENT INITIALIZATION ---
+if "scanned_vals" not in st.session_state:
+    st.session_state.scanned_vals = {"pitched_sq": "0.0", "flat_sq": "0.0", "eaves": "0.0", "valleys": "0.0", "hips": "0.0", "ridges": "0.0", "rakes": "0.0"}
+
+if "ai_metadata" not in st.session_state:
+    st.session_state.ai_metadata = {"po": "", "tile_type": "", "birdstop": "Black", "drip_edge": "White"}
+
+if "processed_roofr_hash" not in st.session_state:
+    st.session_state.processed_roofr_hash = None
+
+if "processed_contract_hash" not in st.session_state:
+    st.session_state.processed_contract_hash = None
+
 if os.path.exists("logo.png"):
     st.image("logo.png", width=200)
 
-st.title("Roofing Material Ordering Dashboard")
-st.write("Drop your job files below to scroll through your blueprints and pricing models seamlessly on the right panel.")
+st.title("RealRoofing MO Production Dashboard")
+st.write("Upload your structural reports and signed customer contracts to automatically cross-reference data and generate material orders.")
 
 # ==========================================
 # 📋 TWO-FILE UPLOADER HUB
 # ==========================================
-scanned_vals = {"pitched_sq": "", "flat_sq": "", "eaves": "", "valleys": "", "hips": "", "ridges": "", "rakes": ""}
-roofr_pages_bytes = None
-quote_pages_bytes = None
-
 st.header("📋 Automated Document Upload Hub")
+roofr_pages_bytes = None
+contract_pages_bytes = None
+
 if not PDF_ENGINES_AVAILABLE:
     st.info("💡 *PDF Processing Modules are active when deployed live with pypdf and pdf2image requirements.*")
 else:
-    # Twin File Upload Row
     up_col1, up_col2 = st.columns(2)
-    
     with up_col1:
         uploaded_roofr = st.file_uploader("1. Upload Roofr Measurement Report (PDF)", type=["pdf"])
     with up_col2:
-        uploaded_quote = st.file_uploader("2. Upload Estimate / Supplier Quote (PDF)", type=["pdf"])
+        uploaded_contract = st.file_uploader("2. Upload Signed Homeowner Contract (PDF)", type=["pdf"])
     
-    # Process File 1: Roofr Takeoff Text Parsing
+    # 📐 ROOFR DATA PARSING GATEWAY
     if uploaded_roofr is not None:
-        try:
-            roofr_pages_bytes = uploaded_roofr.read()
-            uploaded_roofr.seek(0)
-            
-            reader = pypdf.PdfReader(uploaded_roofr)
-            full_text = ""
-            for page in reader.pages:
-                text_content = page.extract_text()
-                if text_content:
-                    full_text += text_content + "\n"
-            
-            def parse_metric(pattern, text):
-                match = re.search(pattern, text, re.IGNORECASE)
-                if match:
-                    return match.group(1).strip()
-                return ""
+        roofr_pages_bytes = uploaded_roofr.getvalue()
+        current_roofr_hash = f"{uploaded_roofr.name}_{len(roofr_pages_bytes)}"
+        
+        if st.session_state.processed_roofr_hash != current_roofr_hash:
+            try:
+                reader = pypdf.PdfReader(BytesIO(roofr_pages_bytes))
+                full_text = ""
+                for page in reader.pages:
+                    text_content = page.extract_text()
+                    if text_content:
+                        full_text += text_content + "\n"
+                
+                def parse_metric(pattern, text):
+                    match = re.search(pattern, text, re.IGNORECASE)
+                    return match.group(1).strip() if match else "0"
 
-            raw_pitched_ft = parse_metric(r"Pitched\s*Roof\s*Area\s*[:\-]?\s*([\d\.,]+)\s*sq", full_text)
-            raw_flat_ft = parse_metric(r"Flat\s*Roof\s*Area\s*[:\-]?\s*([\d\.,]+)\s*sq", full_text)
-            
-            if not raw_pitched_ft:
-                raw_pitched_ft = parse_metric(r"Pitched\s*Area\s*[:\-]?\s*([\d\.,]+)\s*SQ", full_text)
-            if not raw_flat_ft:
-                raw_flat_ft = parse_metric(r"Flat\s*Area\s*[:\-]?\s*([\d\.,]+)\s*SQ", full_text)
-            
-            if not raw_pitched_ft and not raw_flat_ft:
-                universal_ft = parse_metric(r"(?:Total Area|Squares)\s*[:\-]?\s*([\d\.,]+)\s*sq", full_text)
-                raw_pitched_ft = universal_ft
-                raw_flat_ft = universal_ft
+                raw_pitched_ft = parse_metric(r"Pitched\s*Roof\s*Area\s*[:\-]?\s*([\d\.,]+)\s*sq", full_text)
+                raw_flat_ft = parse_metric(r"Flat\s*Roof\s*Area\s*[:\-]?\s*([\d\.,]+)\s*sq", full_text)
+                
+                if raw_pitched_ft == "0":
+                    raw_pitched_ft = parse_metric(r"Pitched\s*Area\s*[:\-]?\s*([\d\.,]+)\s*SQ", full_text)
+                if raw_flat_ft == "0":
+                    raw_flat_ft = parse_metric(r"Flat\s*Area\s*[:\-]?\s*([\d\.,]+)\s*SQ", full_text)
+                
+                if raw_pitched_ft == "0" and raw_flat_ft == "0":
+                    universal_ft = parse_metric(r"(?:Total Area|Squares)\s*[:\-]?\s*([\d\.,]+)\s*sq", full_text)
+                    raw_pitched_ft = universal_ft
+                    raw_flat_ft = universal_ft
 
-            if raw_pitched_ft:
-                scanned_vals["pitched_sq"] = f"{get_num(raw_pitched_ft) / 100:.1f}"
-            if raw_flat_ft:
-                scanned_vals["flat_sq"] = f"{get_num(raw_flat_ft) / 100:.1f}"
+                st.session_state.scanned_vals["pitched_sq"] = f"{get_num(raw_pitched_ft) / 100:.1f}"
+                st.session_state.scanned_vals["flat_sq"] = f"{get_num(raw_flat_ft) / 100:.1f}"
+                st.session_state.scanned_vals["eaves"] = parse_metric(r"Eaves\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
+                st.session_state.scanned_vals["valleys"] = parse_metric(r"Valleys\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
+                st.session_state.scanned_vals["hips"] = parse_metric(r"Hips\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
+                st.session_state.scanned_vals["ridges"] = parse_metric(r"Ridges?\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
+                st.session_state.scanned_vals["rakes"] = parse_metric(r"Rakes\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
+                
+                st.session_state.processed_roofr_hash = current_roofr_hash
+                st.success("✅ Roofr measurements scanned! Adjustments can be made below.")
+            except Exception as e:
+                st.error(f"Could not parse Roofr blueprint text. Error: {e}")
 
-            scanned_vals["eaves"] = parse_metric(r"Eaves\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
-            scanned_vals["valleys"] = parse_metric(r"Valleys\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
-            scanned_vals["hips"] = parse_metric(r"Hips\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
-            scanned_vals["ridges"] = parse_metric(r"Ridges?\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
-            scanned_vals["rakes"] = parse_metric(r"Rakes\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
-            
-            st.success("✅ Roofr measurements scanned into left-side configuration controls!")
-        except Exception as e:
-            st.error(f"Could not parse Roofr blueprint text. Error: {e}")
-
-    if uploaded_quote is not None:
-        quote_pages_bytes = uploaded_quote.read()
-        st.success("✅ Supplier material quote parsed successfully!")
+    # 🤖 AI CUSTOMER CONTRACT PROCESSING GATEWAY
+    if uploaded_contract is not None:
+        contract_pages_bytes = uploaded_contract.getvalue()
+        current_contract_hash = f"{uploaded_contract.name}_{len(contract_pages_bytes)}"
+        
+        if st.session_state.processed_contract_hash != current_contract_hash:
+            try:
+                contract_reader = pypdf.PdfReader(BytesIO(contract_pages_bytes))
+                contract_text = ""
+                for page in contract_reader.pages:
+                    txt = page.extract_text()
+                    if txt:
+                        contract_text += txt + "\n"
+                
+                with st.spinner("AI is analyzing signed contract for customer specs & colors..."):
+                    ai_extracted = ask_ai_to_extract_contract_metadata(contract_text)
+                    st.session_state.ai_metadata = ai_extracted
+                    st.session_state.processed_contract_hash = current_contract_hash
+                    st.success("✅ Signed contract processed by AI engine!")
+            except Exception as e:
+                st.error(f"Could not analyze customer contract file. Error: {e}")
 
 st.markdown("---")
 
@@ -108,19 +196,17 @@ st.markdown("---")
 # ==========================================
 left_panel, right_panel = st.columns([1.0, 1.0], gap="large")
 
-# 📥 LEFT PANEL: MATERIAL ENGINE CONFIGURATION
 with left_panel:
     st.subheader("🛠️ Production Controls & Layout Settings")
-    
     material_type = st.radio("Material Type", options=["Tile", "Shingles", "Mod Bit"], horizontal=True)
     job_type = st.radio("Job Type", options=["New Tile", "Re-Roof"], index=1, horizontal=True) if material_type == "Tile" else None
     
     st.markdown("### 📏 Dimensions")
     
     if material_type == "Mod Bit":
-        mod_sq = get_num(st.text_input("Square Count (SQ)", value=scanned_vals["flat_sq"]))
-        mod_eaves = get_num(st.text_input("Eaves (Linear Feet)", value=scanned_vals["eaves"]))
-        mod_rakes = get_num(st.text_input("Rakes (Linear Feet)", value=scanned_vals["rakes"]))
+        mod_sq = get_num(st.text_input("Square Count (SQ)", value=st.session_state.scanned_vals["flat_sq"]))
+        mod_eaves = get_num(st.text_input("Eaves (Linear Feet)", value=st.session_state.scanned_vals["eaves"]))
+        mod_rakes = get_num(st.text_input("Rakes (Linear Feet)", value=st.session_state.scanned_vals["rakes"]))
         
         CAPSHEET_COLORS = ["Buff", "Grey Slate", "Black", "White", "Weatherwood"]
         cap_color = st.selectbox("Cap Sheet Color", CAPSHEET_COLORS)
@@ -137,17 +223,19 @@ with left_panel:
             base_rolls = math.ceil((mod_eaves + mod_rakes) / 66) if (mod_eaves + mod_rakes) > 0 else 0
             base_description, base_quantity_str = 'Polyglass SAV 9" Self-Adhered (66 LF/roll)', f"{base_rolls} Rolls ({mod_eaves + mod_rakes:.0f} LF @ 66 LF/roll)"
             
+        descriptions = [f"Polyglass Cap Sheet — {cap_color}", base_description, "Drip Edge (10ft sections, eaves only)"]
+        quantities = [f"{cap_rolls} Rolls", f"{base_rolls} Rolls", f"{mb_drip_pieces} Pcs"]
     else:
         sub_col1, sub_col2 = st.columns(2)
         with sub_col1:
-            sq_count = get_num(st.text_input("Square Count (SQ)", value=scanned_vals["pitched_sq"]))
+            sq_count = get_num(st.text_input("Square Count (SQ)", value=st.session_state.scanned_vals["pitched_sq"]))
             product = st.selectbox("Product Profile", ["Eagle (S-Profile)", "Eagle (W-Profile)", "Eagle (Flat)", "Westlake (S-Profile)", "Westlake (W-Profile)", "Westlake (Flat)"] if material_type == "Tile" else ["GAF Timberline HDZ (Architectural)", "GAF Royal Sovereign (3-Tab)", "GAF Timberline UHDZ"])
-            eaves = get_num(st.text_input("Eaves (Linear Feet)", value=scanned_vals["eaves"]))
-            valleys = get_num(st.text_input("Valleys (Linear Feet)", value=scanned_vals["valleys"]))
+            eaves = get_num(st.text_input("Eaves (Linear Feet)", value=st.session_state.scanned_vals["eaves"]))
+            valleys = get_num(st.text_input("Valleys (Linear Feet)", value=st.session_state.scanned_vals["valleys"]))
         with sub_col2:
-            hips = get_num(st.text_input("Hips (Linear Feet)", value=scanned_vals["hips"]))
-            ridges = get_num(st.text_input("Ridges (Linear Feet)", value=scanned_vals["ridges"]))
-            rakes = get_num(st.text_input("Rakes (Linear Feet)", value=scanned_vals["rakes"]))
+            hips = get_num(st.text_input("Hips (Linear Feet)", value=st.session_state.scanned_vals["hips"]))
+            ridges = get_num(st.text_input("Ridges (Linear Feet)", value=st.session_state.scanned_vals["ridges"]))
+            rakes = get_num(st.text_input("Rakes (Linear Feet)", value=st.session_state.scanned_vals["rakes"]))
             waste_pct = get_num(st.text_input("Waste Factor (%)", value="10"))
 
         underlayment_roll_size = st.selectbox("Underlayment Roll Size", options=[2, 5, 10], format_func=lambda x: f"{x} SQ roll")
@@ -155,7 +243,7 @@ with left_panel:
         WASTE_FACTOR = 1 + (waste_pct / 100)
         hip_ridge_lf = hips + ridges
         underlayment_rolls = math.ceil((sq_count * 1.15) / underlayment_roll_size)
-        valley_sections = math.ceil(valleys / 10) if valleys > 0 else 0
+        valley_pieces = math.ceil(valleys / 10) if valleys > 0 else 0
         
         if material_type == "Tile":
             total_squares_with_waste = sq_count * WASTE_FACTOR
@@ -163,167 +251,135 @@ with left_panel:
                 pallets_needed = 0.5 if sq_count < 20 else math.ceil((sq_count / 20) * 2) / 2
             else:
                 pallets_needed = math.ceil(total_squares_with_waste / 2.97)
+                
             tile_drip_pieces = (math.ceil(eaves / drip_edge_length) if eaves > 0 else 0) + 2
             birdstop_pieces = (math.ceil(eaves / 10) if eaves > 0 else 0) + 2
             is_flat_tile = "Flat" in product
             batten_bundles = math.ceil(sq_count)
             hip_bundles = 0 if is_flat_tile else math.ceil(hips / 25)
             ridge_bundles = math.ceil(hip_ridge_lf / 100) if is_flat_tile else math.ceil(ridges / 50)
+            
+            hip_ridge_desc = ["Hip Closures", "Ridge Closures"] if not is_flat_tile else ["Hip & Ridge Closures"]
+            hip_ridge_qty = [f"{hip_bundles} Bundles", f"{ridge_bundles} Bundles"] if not is_flat_tile else [f"{ridge_bundles} Bundles"]
+            descriptions = [f"Field Tile: {product}", f"Tile Underlayment ({underlayment_roll_size} SQ)", *hip_ridge_desc, "Roof Battens", "Birdstop Pieces", "Drip Edge (Eaves)"]
+            quantities = [f"{pallets_needed:g} Pallets", f"{underlayment_rolls} Rolls", *hip_ridge_qty, f"{batten_bundles} Bundles", f"{birdstop_pieces} Pcs", f"{tile_drip_pieces} Pcs"]
         else:
             total_squares_with_waste = sq_count * WASTE_FACTOR
             shingle_drip_pieces = (math.ceil((eaves + rakes) / drip_edge_length) if (eaves + rakes) > 0 else 0) + 2
             field_bundles = math.ceil(total_squares_with_waste * 3)
             hip_ridge_bundles = math.ceil(hip_ridge_lf / 33) if hip_ridge_lf > 0 else 0
             starter_bundles = math.ceil(eaves / 100) if eaves > 0 else 0
+            
             field_nail_boxes = math.ceil(sq_count / 20) if sq_count > 0 else 0
             eave_nail_boxes  = math.ceil(sq_count / 20) if sq_count > 0 else 0
             cap_nail_boxes   = math.ceil(sq_count / 20) if sq_count > 0 else 0
+            
+            descriptions = [f"Field Shingles: {product}", f"Underlayment ({underlayment_roll_size} SQ)", "Hip & Ridge Cap", "Starter Strip", "Drip Edge Pieces", "Shingle Field Nails", "Eave Coil Nails", "Plastic Cap Nails"]
+            quantities = [f"{field_bundles} Bundles", f"{underlayment_rolls} Rolls", f"{hip_ridge_bundles} Bundles", f"{starter_bundles} Bundles", f"{shingle_drip_pieces} Pcs", f"{field_nail_boxes} Box(es)", f"{eave_nail_boxes} Box(es)", f"{cap_nail_boxes} Box(es)"]
 
-# 🖼️ RIGHT PANEL: SCROLL BOX IN A FIXED LOCATION (SAFE FROM BRAVE SHIELDS)
+    if material_type != "Mod Bit" and valleys > 0:
+        descriptions.append("Valley Flashing (W-Valley)")
+        quantities.append(f"{valley_pieces} Sections")
+
+    # --- 🔍 HUMAN-IN-THE-LOOP AI VALIDATION PANEL ---
+    st.markdown("---")
+    st.subheader("📝 Verify Contract Selections")
+    ai_vals = st.session_state.ai_metadata
+    
+    col_m1, col_m2 = st.columns(2)
+    with col_m1:
+        final_po = st.text_input("PO Number / Job Name Reference", value=ai_vals.get("po", ""), help="Extracted automatically from the signed contract.")
+        final_tile = st.text_input("Contracted Tile/Product Profile", value=ai_vals.get("tile_type", ""))
+    with col_m2:
+        final_birdstop = st.text_input("Birdstop Color Spec", value=ai_vals.get("birdstop", "Black"))
+        final_drip = st.text_input("Drip Edge Color Spec", value=ai_vals.get("drip_edge", "White"))
+
+# 🖼️ RIGHT PANEL: SCROLLABLE GRAPHICS VIEWPORT
 with right_panel:
     st.subheader("🖼️ Document Reference Panel")
-    
-    view_toggle = st.radio(
-        "Display View Mode",
-        options=["1. Roofr Measurement Blueprint", "2. Active Supplier Estimate"],
-        horizontal=True
-    )
-    
+    view_toggle = st.radio("Display View Mode", options=["1. Roofr Measurement Blueprint", "2. Signed Homeowner Contract"], horizontal=True)
     st.markdown("---")
     
-    target_bytes = roofr_pages_bytes if "Roofr" in view_toggle else quote_pages_bytes
-    label_tag = "Roofr Takeoff Blueprint" if "Roofr" in view_toggle else "Supplier Material Quote"
+    target_bytes = roofr_pages_bytes if "Roofr" in view_toggle else contract_pages_bytes
+    label_tag = "Roofr Takeoff Blueprint" if "Roofr" in view_toggle else "Signed Homeowner Contract"
     
     if target_bytes is not None:
         try:
-            with st.spinner("Compiling scroll viewport layout..."):
-                all_images = convert_from_bytes(target_bytes)
-                html_content = '<div style="height: 750px; overflow-y: scroll; border: 2px solid #4A5568; border-radius: 8px; padding: 10px; background-color: #1A202C;">'
-                
-                for i, page_img in enumerate(all_images):
-                    buffered = BytesIO()
-                    page_img.save(buffered, format="JPEG")
-                    img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
-                    html_content += f'<div style="text-align: center; margin-bottom: 20px;">'
-                    html_content += f'<p style="color: #A0AEC0; font-family: sans-serif; font-size: 14px;">📄 {label_tag} — Page {i+1}</p>'
-                    html_content += f'<img src="data:image/jpeg;base64,{img_base64}" style="width: 100%; max-width: 800px; border-radius: 4px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">'
-                    html_content += f'</div>'
-                    
-                html_content += '</div>'
-                components.html(html_content, height=770, scrolling=False)
+            with st.spinner("Compiling continuous view layouts..."):
+                html_rendered = cached_pdf_to_html_viewport(target_bytes, label_tag)
+                components.html(html_rendered, height=770, scrolling=False)
         except Exception as err:
-            st.caption("Rendering continuous visual frame profile...")
+            st.caption("Rendering visual reference layout frame...")
     else:
-        st.info(f"💡 Drop your PDF files into the uploader matrix above to lock and load the scrollable window for this document.")
+        st.info(f"💡 Drop your PDF files into the uploader matrix above to unlock the scrollable window for this document.")
 
-# 📋 BOTTOM ROW: SYSTEM OUTPUT MANIFESTS
+# 📋 BOTTOM ROW: DRAFT ORDER TABLE ENGINE
 st.markdown("---")
-st.header("2. Calculated Material Order")
+st.header("2. Calculated Material Order Manifest")
 
-manifest_ready = False
-descriptions = []
-quantities = []
-
-if material_type == "Mod Bit" and (mod_sq > 0 or (mod_eaves + mod_rakes) > 0):
-    manifest_ready = True
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Cap Sheet Rolls", f"{cap_rolls} Rolls")
-    c2.metric(f"{mod_bit_base_type.split(' (')[0]} Rolls", f"{base_rolls} Rolls")
-    c3.metric("Drip Edge Pieces", f"{mb_drip_pieces} Pcs")
-    
-    descriptions = [f"Polyglass Cap Sheet — {cap_color}", base_description, "Drip Edge (10ft sections, eaves only)"]
-    quantities = [f"{cap_rolls} Rolls (covers {cap_rolls} SQ)", base_quantity_str, f"{mb_drip_pieces} Pieces ({mb_drip_pieces * 10} LF)"]
-
-elif material_type != "Mod Bit" and sq_count > 0:
-    manifest_ready = True
-    if material_type == "Tile":
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric(f"Field SQ (+{waste_pct:.0f}% Waste)", f"{total_squares_with_waste:.1f} SQ")
-        c2.metric("Pallets Needed", f"{pallets_needed:g} Pallets")
-        c3.metric("Underlayment Rolls", f"{underlayment_rolls} Rolls")
-        c4.metric("Hip/Ridge Closures", f"{ridge_bundles} Bundles" if is_flat_tile else f"{hip_bundles} / {ridge_bundles} Bundles")
-        
-        hip_ridge_desc = ["Hip & Ridge Closures (100 LF/bundle)"] if is_flat_tile else ["Hip Closures (25 LF/bundle)", "Ridge Closures (50 LF/bundle)"]
-        hip_ridge_qty = [f"{ridge_bundles} Bundles"] if is_flat_tile else [f"{hip_bundles} Bundles", f"{ridge_bundles} Bundles"]
-        descriptions = [f"Field Tile: {product}", f"Tile Underlayment ({underlayment_roll_size}-SQ Rolls)", *hip_ridge_desc, "Roof Battens", "Eave Closure / Birdstop", "Drip Edge (eaves only)"]
-        quantities = [f"{pallets_needed:g} Pallets (Breakage)" if job_type == "Re-Roof" else f"{total_squares_with_waste:.1f} SQ ({pallets_needed:g} Pallets)", f"{underlayment_rolls} Rolls", *hip_ridge_qty, f"{batten_bundles} Bundles", f"{birdstop_pieces} Pcs", f"{tile_drip_pieces} Pcs"]
-    else:
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric(f"Field SQ (+{waste_pct:.0f}% Waste)", f"{total_squares_with_waste:.1f} SQ")
-        c2.metric("Field Bundles", f"{field_bundles} Bundles")
-        c3.metric("Underlayment Rolls", f"{underlayment_rolls} Rolls")
-        c4.metric("Hip/Ridge Cap Bundles", f"{hip_ridge_bundles} Bundles")
-        
-        descriptions = [f"Field Shingles: {product}", f"Underlayment ({underlayment_roll_size}-SQ Rolls)", "Hip & Ridge Cap", "Starter Strip", "Drip Edge", "Shingle Field Nails", "Eave Coil Nails", "Plastic Cap Nails"]
-        quantities = [f"{field_bundles} Bundles", f"{underlayment_rolls} Rolls", f"{hip_ridge_bundles} Bundles", f"{starter_bundles} Bundles", f"{shingle_drip_pieces} Pcs", f"{field_nail_boxes} Box(es) (Net SQ)", f"{eave_nail_boxes} Box(es) (Net SQ)", f"{cap_nail_boxes} Box(es) (Net SQ)"]
+manifest_ready = (material_type == "Mod Bit" and (mod_sq > 0 or (mod_eaves + mod_rakes) > 0)) or (material_type != "Mod Bit" and sq_count > 0)
 
 if manifest_ready:
-    if material_type != "Mod Bit" and valleys > 0:
-        descriptions.append("Valley Flashing (W-Valley)")
-        quantities.append(f"{valley_sections} Sections")
-        
-    st.table({"Material Description": descriptions, "Calculated Quantity": quantities})
-    
-    st.header("3. Operations Actions")
-    
-    act_col1, act_col2 = st.columns(2)
-    with act_col1:
-        job_address = st.text_input("Job Address / Name", placeholder="e.g., Lot 42 - Whispering Pines")
-    with act_col2:
-        crew_notes = st.text_input("Crew / Field Logistics Notes", placeholder="e.g., Dumpster in driveway, protect bushes on north slope...")
-    
-    # NEW FEATURE: Delivery Ticket HTML Generator Blueprint
-    table_rows_html = ""
-    for desc, qty in zip(descriptions, quantities):
-        table_rows_html += f"<tr><td style='padding:10px; border-bottom:1px solid #ddd;'>{desc}</td><td style='padding:10px; border-bottom:1px solid #ddd; text-align:right; font-weight:bold;'>{qty}</td></tr>"
-
-    html_ticket_template = f"""
-    <html>
-    <body style="font-family: Arial, sans-serif; padding: 40px; color: #333;">
-        <div style="border: 2px solid #333; padding: 20px; border-radius: 8px;">
-            <h2 style="text-align: center; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px;">Roofing Material Delivery Ticket</h2>
-            <p style="text-align: center; color: #666; margin-top: 0; font-size: 13px;">Production manifest generated via Calculator Dashboard</p>
-            <hr style="border: 1px solid #333; margin-bottom: 20px;">
-            
-            <table style="width: 100%; margin-bottom: 20px; font-size: 14px;">
-                <tr><td><strong>Job Location:</strong> {job_address if job_address else 'Not Specified'}</td></tr>
-                <tr><td><strong>Material Category:</strong> {material_type} {'('+job_type+')' if job_type else ''}</td></tr>
-                <tr><td><strong>Logistics/Crew Notes:</strong> {crew_notes if crew_notes else 'None listed.'}</td></tr>
-            </table>
-            
-            <h3 style="background: #f4f4f4; padding: 8px; margin-bottom: 10px; font-size: 15px;">📦 Loaded Material Checklist</h3>
-            <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                <thead>
-                    <tr style="background: #e2e2e2;"><th style="padding:10px; text-align:left;">Material Description</th><th style="padding:10px; text-align:right;">Quantity Loaded</th></tr>
-                </thead>
-                <tbody>
-                    {table_rows_html}
-                </tbody>
-            </table>
-            
-            <div style="margin-top: 50px; font-size: 12px; display: flex; justify-content: space-between;">
-                <div><p>_____________________________________<br>Driver Loading Verification Signature</p></div>
-                <div style="text-align: right;"><p>_____________________________________<br>Field Superintendent Receiving Signature</p></div>
-            </div>
-        </div>
-        <script>window.print();</script>
-    </body>
-    </html>
-    """
-
-    # Create a simple direct printing function using standard web frames
-    st.markdown("### 🖨️ Document Export Center")
-    if job_address:
-        st.download_button(
-            label="Download Delivery Ticket Printout File",
-            data=html_ticket_template,
-            file_name=f"Delivery_Ticket_{job_address.replace(' ', '_')}.html",
-            mime="text/html",
-            help="Downloads a print-ready document file. Opening this file will instantly open your computer's standard print menu to print or save as a clean PDF document."
-        )
+    if material_type == "Mod Bit":
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Cap Sheet Rolls", f"{cap_rolls} Rolls")
+        c2.metric(f"{mod_bit_base_type.split(' (')[0]} Rolls", f"{base_rolls} Rolls")
+        c3.metric("Drip Edge Pieces", f"{mb_drip_pieces} Pcs")
     else:
-        st.caption("⚠️ *Type a Job Address / Name above to unlock the printable Delivery Ticket file generator.*")
-        
-else:
-    st.info("💡 Upload data files or enter sizing values to populate the order manifests.")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric(f"Field SQ (+{waste_pct:.0f}% Waste)", f"{total_squares_with_waste:.1f} SQ")
+        if material_type == "Tile":
+            c2.metric("Pallets Needed", f"{pallets_needed:g} Pallets")
+            c4.metric("Hip/Ridge Closures", f"{ridge_bundles} Bundles" if is_flat_tile else f"{hip_bundles} / {ridge_bundles} Bundles")
+        else:
+            c2.metric("Field Bundles", f"{field_bundles} Bundles")
+            c4.metric("Hip/Ridge Cap Bundles", f"{hip_ridge_bundles} Bundles")
+        c3.metric("Underlayment Rolls", f"{underlayment_rolls} Rolls")
+
+    st.table({"Material Item Description": descriptions, "Calculated Quantity": quantities})
     
+    st.header("3. Actions")
+    job_address = st.text_input("Job Address / Name Confirmation (JobNimbus Match)", placeholder="e.g., Smith - 123 Main St")
+    crew_notes = st.text_area("Production / Delivery Notes", placeholder="e.g., alley drop-off, roof loaded...", height=100)
+
+    # 🚀 LIVE CRM INJECTION GATEWAY (Direct Material Order Target)
+    if st.button("Confirm & Push Material Order inside JobNimbus"):
+        if job_address and JN_TOKEN:
+            with st.spinner("Injecting manifest items directly to your JobNimbus file..."):
+                try:
+                    line_items_api = []
+                    for desc, qty in zip(descriptions, quantities):
+                        extracted_qty = float(re.findall(r"[-+]?\d*\.\d+|\d+", qty)[0]) if re.findall(r"[-+]?\d*\.\d+|\d+", qty) else 1.0
+                        line_items_api.append({
+                            "name": desc,
+                            "description": f"Calculated by RealRoofing Assistant Engine. Profile Selection: {final_tile}.",
+                            "quantity": extracted_qty,
+                            "item_type": "material"
+                        })
+                    
+                    payload = {
+                        "related": [job_address],
+                        "status": 1, 
+                        "type": "material_order",  # Target the CRM Material Order system directly
+                        "po_number": final_po,       # Populates native PO Number field
+                        "internal_note": f"CONTRACTED SPECS -- Tile: {final_tile} | Birdstop Color: {final_birdstop} | Drip Edge Color: {final_drip}. Field Instructions: {crew_notes.strip()}",
+                        "items": line_items_api
+                    }
+                    
+                    headers = {
+                        "Authorization": f"Bearer {JN_TOKEN}",
+                        "Content-Type": "application/json"
+                    }
+                    
+                    response = requests.post("[https://app.jobnimbus.com/api1/estimates](https://app.jobnimbus.com/api1/estimates)", json=payload, headers=headers)
+                    
+                    if response.status_code in [200, 201]:
+                        st.success(f"🚀 Success! Material Order successfully generated for **{job_address}** with PO **{final_po}** inside JobNimbus.")
+                    else:
+                        st.warning(f"Network linked, but JobNimbus rejected structural formatting. Error Code: {response.status_code}")
+                except Exception as err:
+                    st.error(f"Could not reach JobNimbus cloud database servers. Error: {err}")
+        else:
+            st.warning("⚠️ Enter a Job Address or ensure your JOBNIMBUS_TOKEN is activated inside your Streamlit App Secrets.")
+else:
+    st.info("💡 Drop a takeoff report into the hub at the top of the page to populate the order manifests.")
