@@ -96,19 +96,16 @@ def lookup_internal_jnid(job_num_str, headers):
     if "_" in cleaned_num and len(cleaned_num) >= 12:
         return cleaned_num
         
-    # Generate search variants to handle index tokenization variants
     search_variants = [
         cleaned_num,
         cleaned_num.lower(),
         cleaned_num.upper()
     ]
     
-    # Fallback variant: Extract just numbers (e.g., "1995" out of "RR-1995")
     digits_only = "".join(filter(str.isdigit, cleaned_num))
     if digits_only and digits_only != cleaned_num:
         search_variants.append(digits_only)
         
-    # Phase 1: High-speed filtered lookup variants
     for variant in list(dict.fromkeys(search_variants)):
         filter_payload = json.dumps({
             "must": [
@@ -134,7 +131,6 @@ def lookup_internal_jnid(job_num_str, headers):
         except Exception:
             pass
 
-    # Phase 2: In-memory containment scan fallback (bypasses tokenizer restrictions)
     try:
         for endpoint in ["jobs", "contacts"]:
             res = requests.get(f"https://app.jobnimbus.com/api1/{endpoint}?size=150", headers=headers, timeout=6)
@@ -284,175 +280,3 @@ with left_panel:
         else:
             base_rolls = math.ceil((mod_eaves + mod_rakes) / 66) if (mod_eaves + mod_rakes) > 0 else 0
             base_description, base_quantity_str = 'Polyglass SAV 9" Self-Adhered (66 LF/roll)', f"{base_rolls} Rolls ({mod_eaves + mod_rakes:.0f} LF @ 66 LF/roll)"
-            
-        descriptions = [f"Polyglass Cap Sheet — {cap_color}", base_description, "Drip Edge (10ft sections, eaves only)"]
-        quantities = [f"{cap_rolls} Rolls", f"{base_rolls} Rolls", f"{mb_drip_pieces} Pcs"]
-    else:
-        sub_col1, sub_col2 = st.columns(2)
-        with sub_col1:
-            sq_count = get_num(st.text_input("Square Count (SQ)", value=st.session_state.scanned_vals["pitched_sq"]))
-            product = st.selectbox("Product Profile", ["Eagle (S-Profile)", "Eagle (W-Profile)", "Eagle (Flat)", "Westlake (S-Profile)", "Westlake (W-Profile)", "Westlake (Flat)"] if material_type == "Tile" else ["GAF Timberline HDZ (Architectural)", "GAF Royal Sovereign (3-Tab)", "GAF Timberline UHDZ"])
-            eaves = get_num(st.text_input("Eaves (Linear Feet)", value=st.session_state.scanned_vals["eaves"]))
-            valleys = get_num(st.text_input("Valleys (Linear Feet)", value=st.session_state.scanned_vals["valleys"]))
-        with sub_col2:
-            hips = get_num(st.text_input("Hips (Linear Feet)", value=st.session_state.scanned_vals["hips"]))
-            ridges = get_num(st.text_input("Ridges (Linear Feet)", value=st.session_state.scanned_vals["ridges"]))
-            rakes = get_num(st.text_input("Rakes (Linear Feet)", value=st.session_state.scanned_vals["rakes"]))
-            waste_pct = get_num(st.text_input("Waste Factor (%)", value="10"))
-
-        underlayment_roll_size = st.selectbox("Underlayment Roll Size", options=[2, 5, 10], format_func=lambda x: f"{x} SQ roll")
-        drip_edge_length = 10
-        WASTE_FACTOR = 1 + (waste_pct / 100)
-        hip_ridge_lf = hips + ridges
-        underlayment_rolls = math.ceil((sq_count * 1.15) / underlayment_roll_size)
-        valley_pieces = math.ceil(valleys / 10) if valleys > 0 else 0
-        
-        if material_type == "Tile":
-            total_squares_with_waste = sq_count * WASTE_FACTOR
-            if job_type == "Re-Roof":
-                pallets_needed = 0.5 if sq_count < 20 else math.ceil((sq_count / 20) * 2) / 2
-            else:
-                pallets_needed = math.ceil(total_squares_with_waste / 2.97)
-                
-            tile_drip_pieces = (math.ceil(eaves / drip_edge_length) if eaves > 0 else 0) + 2
-            birdstop_pieces = (math.ceil(eaves / 10) if eaves > 0 else 0) + 2
-            is_flat_tile = "Flat" in product
-            batten_bundles = math.ceil(sq_count)
-            hip_bundles = 0 if is_flat_tile else math.ceil(hips / 25)
-            ridge_bundles = math.ceil(hip_ridge_lf / 100) if is_flat_tile else math.ceil(ridges / 50)
-            
-            hip_ridge_desc = ["Hip Closures", "Ridge Closures"] if not is_flat_tile else ["Hip & Ridge Closures"]
-            hip_ridge_qty = [f"{hip_bundles} Bundles", f"{ridge_bundles} Bundles"] if not is_flat_tile else [f"{ridge_bundles} Bundles"]
-            descriptions = [f"Field Tile: {product}", f"Tile Underlayment ({underlayment_roll_size} SQ)", *hip_ridge_desc, "Roof Battens", "Birdstop Pieces", "Drip Edge (Eaves)"]
-            quantities = [f"{pallets_needed:g} Pallets", f"{underlayment_rolls} Rolls", *hip_ridge_qty, f"{batten_bundles} Bundles", f"{birdstop_pieces} Pcs", f"{tile_drip_pieces} Pcs"]
-        else:
-            total_squares_with_waste = sq_count * WASTE_FACTOR
-            shingle_drip_pieces = (math.ceil((eaves + rakes) / drip_edge_length) if (eaves + rakes) > 0 else 0) + 2
-            field_bundles = math.ceil(total_squares_with_waste * 3)
-            hip_ridge_bundles = math.ceil(hip_ridge_lf / 33) if hip_ridge_lf > 0 else 0
-            starter_bundles = math.ceil(eaves / 100) if eaves > 0 else 0
-            
-            field_nail_boxes = math.ceil(sq_count / 20) if sq_count > 0 else 0
-            eave_nail_boxes  = math.ceil(sq_count / 20) if sq_count > 0 else 0
-            cap_nail_boxes   = math.ceil(sq_count / 20) if sq_count > 0 else 0
-            
-            descriptions = [f"Field Shingles: {product}", f"Underlayment ({underlayment_roll_size} SQ)", "Hip & Ridge Cap", "Starter Strip", "Drip Edge Pieces", "Shingle Field Nails", "Eave Coil Nails", "Plastic Cap Nails"]
-            quantities = [f"{field_bundles} Bundles", f"{underlayment_rolls} Rolls", f"{hip_ridge_bundles} Bundles", f"{starter_bundles} Bundles", f"{shingle_drip_pieces} Pcs", f"{field_nail_boxes} Box(es)", f"{eave_nail_boxes} Box(es)", f"{cap_nail_boxes} Box(es)"]
-
-    if material_type != "Mod Bit" and valleys > 0:
-        descriptions.append("Valley Flashing (W-Valley)")
-        quantities.append(f"{valley_pieces} Sections")
-
-    # --- 🔍 HUMAN-IN-THE-LOOP AI VALIDATION PANEL ---
-    st.markdown("---")
-    st.subheader("📝 Verify Contract Selections")
-    ai_vals = st.session_state.ai_metadata
-    
-    col_m1, col_m2 = st.columns(2)
-    with col_m1:
-        final_po = st.text_input("PO Number / Reference", value=ai_vals.get("po", ""), help="Extracted automatically from the signed contract.")
-        final_tile = st.text_input("Contracted Tile/Product Profile", value=ai_vals.get("tile_type", ""))
-    with col_m2:
-        final_birdstop = st.text_input("Birdstop Color Spec", value=ai_vals.get("birdstop", "Black"))
-        final_drip = st.text_input("Drip Edge Color Spec", value=ai_vals.get("drip_edge", "White"))
-
-# 🖼️ RIGHT PANEL: SCROLLABLE GRAPHICS VIEWPORT
-with right_panel:
-    st.subheader("🖼️ Document Reference Panel")
-    view_toggle = st.radio("Display View Mode", options=["1. Roofr Measurement Blueprint", "2. Signed Homeowner Contract"], horizontal=True)
-    st.markdown("---")
-    
-    target_bytes = roofr_pages_bytes if "Roofr" in view_toggle else contract_pages_bytes
-    label_tag = "Roofr Takeoff Blueprint" if "Roofr" in view_toggle else "Signed Homeowner Contract"
-    
-    if target_bytes is not None:
-        try:
-            with st.spinner("Compiling continuous view layouts..."):
-                html_rendered = cached_pdf_to_html_viewport(target_bytes, label_tag)
-                components.html(html_rendered, height=770, scrolling=False)
-        except Exception as err:
-            st.caption("Rendering visual reference layout frame...")
-    else:
-        st.info(f"💡 Drop your PDF files into the uploader matrix above to unlock the scrollable window for this document.")
-
-# 📋 BOTTOM ROW: DRAFT ORDER TABLE ENGINE
-st.markdown("---")
-st.header("2. Calculated Material Order Manifest")
-
-manifest_ready = (material_type == "Mod Bit" and (mod_sq > 0 or (mod_eaves + mod_rakes) > 0)) or (material_type != "Mod Bit" and sq_count > 0)
-
-if manifest_ready:
-    if material_type == "Mod Bit":
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Cap Sheet Rolls", f"{cap_rolls} Rolls")
-        c2.metric(f"{mod_bit_base_type.split(' (')[0]} Rolls", f"{base_rolls} Rolls")
-        c3.metric("Drip Edge Pieces", f"{mb_drip_pieces} Pcs")
-    else:
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric(f"Field SQ (+{waste_pct:.0f}% Waste)", f"{total_squares_with_waste:.1f} SQ")
-        if material_type == "Tile":
-            c2.metric("Pallets Needed", f"{pallets_needed:g} Pallets")
-            c4.metric("Hip/Ridge Closures", f"{ridge_bundles} Bundles" if is_flat_tile else f"{hip_bundles} / {ridge_bundles} Bundles")
-        else:
-            c2.metric("Field Bundles", f"{field_bundles} Bundles")
-            c4.metric("Hip/Ridge Cap Bundles", f"{hip_ridge_bundles} Bundles")
-        c3.metric("Underlayment Rolls", f"{underlayment_rolls} Rolls")
-
-    st.table({"Material Item Description": descriptions, "Calculated Quantity": quantities})
-    
-    st.header("3. Actions")
-    job_number = st.text_input("Job # (JobNimbus System Match)", placeholder="e.g., RR-1995")
-    crew_notes = st.text_area("Production / Delivery Notes", placeholder="e.g., alley drop-off, roof loaded...", height=100)
-
-    # 🚀 LIVE CRM INJECTION GATEWAY
-    if st.button("Confirm & Push Material Order inside JobNimbus"):
-        if not job_number:
-            st.error("⚠️ The 'Job #' input field is empty. Please enter your sequential Job ID number.")
-        elif not JN_TOKEN:
-            st.error("⚠️ Your 'JOBNIMBUS_TOKEN' is missing or completely blank inside your Streamlit App Secrets panel.")
-        else:
-            headers = {
-                "Authorization": f"Bearer {JN_TOKEN}",
-                "Content-Type": "application/json"
-            }
-            
-            with st.spinner("Querying system database directly for verification key..."):
-                resolved_jnid = lookup_internal_jnid(job_number, headers)
-                
-            if not resolved_jnid:
-                st.error(f"❌ Could not find an active file matching Job #{job_number} inside your JobNimbus database. Make sure that job number is completely accurate inside your CRM boards.")
-            else:
-                with st.spinner("Injecting manifest items directly to your JobNimbus file..."):
-                    try:
-                        line_items_api = []
-                        for desc, qty in zip(descriptions, quantities):
-                            extracted_qty = float(re.findall(r"[-+]?\d*\.\d+|\d+", qty)[0]) if re.findall(r"[-+]?\d*\.\d+|\d+", qty) else 1.0
-                            line_items_api.append({
-                                "name": desc,
-                                "description": f"Calculated by RealRoofing Assistant Engine. Profile Selection: {final_tile}.",
-                                "quantity": extracted_qty,
-                                "item_type": "material"
-                            })
-                        
-                        payload = {
-                            "name": f"Material Order Layout - PO {final_po}",
-                            "related": [resolved_jnid], 
-                            "status": 1, 
-                            "type": "estimate",  
-                            "record_type_name": "Estimate", 
-                            "po_number": final_po,       
-                            "internal_note": f"CONTRACTED SPECS -- Tile: {final_tile} | Birdstop Color: {final_birdstop} | Drip Edge Color: {final_drip}. Field Instructions: {crew_notes.strip()}",
-                            "items": line_items_api
-                        }
-                        
-                        response = requests.post("https://app.jobnimbus.com/api1/estimates", json=payload, headers=headers)
-                        
-                        if response.status_code in [200, 201]:
-                            st.success(f"🚀 Success! Material Order draft successfully created under Job **#{job_number}**. Open it inside JobNimbus and select 'Convert to Material Order' to finalize!")
-                        else:
-                            st.error(f"❌ JobNimbus API rejected this order formatting. Error Code: {response.status_code}. Details: {response.text}")
-                    except Exception as err:
-                        st.error(f"Could not reach JobNimbus cloud database servers. Error: {err}")
-else:
-    st.info("💡 Drop a takeoff report into the hub at the top of the page to populate the order manifests.")
-    
