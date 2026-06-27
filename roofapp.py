@@ -337,4 +337,122 @@ with left_panel:
             cap_nail_boxes   = math.ceil(sq_count / 20) if sq_count > 0 else 0
             
             descriptions = [f"Field Shingles: {product}", f"Underlayment ({underlayment_roll_size} SQ)", "Hip & Ridge Cap", "Starter Strip", "Drip Edge Pieces", "Shingle Field Nails", "Eave Coil Nails", "Plastic Cap Nails"]
-            quantities =
+            quantities = [f"{field_bundles} Bundles", f"{underlayment_rolls} Rolls", f"{hip_ridge_bundles} Bundles", f"{starter_bundles} Bundles", f"{shingle_drip_pieces} Pcs", f"{field_nail_boxes} Box(es)", f"{eave_nail_boxes} Box(es)", f"{cap_nail_boxes} Box(es)"]
+
+    if material_type != "Mod Bit" and valleys > 0:
+        descriptions.append("Valley Flashing (W-Valley)")
+        quantities.append(f"{valley_pieces} Sections")
+
+    # --- 🔍 HUMAN-IN-THE-LOOP AI VALIDATION PANEL ---
+    st.markdown("---")
+    st.subheader("📝 Verify Contract Selections")
+    ai_vals = st.session_state.ai_metadata
+    
+    col_m1, col_m2 = st.columns(2)
+    with col_m1:
+        final_po = st.text_input("PO Number / Reference", value=ai_vals.get("po", ""), help="Extracted automatically from the signed contract.")
+        final_tile = st.text_input("Contracted Tile/Product Profile", value=ai_vals.get("tile_type", ""))
+    with col_m2:
+        final_birdstop = st.text_input("Birdstop Color Spec", value=ai_vals.get("birdstop", "Black"))
+        final_drip = st.text_input("Drip Edge Color Spec", value=ai_vals.get("drip_edge", "White"))
+
+# 🖼️ RIGHT PANEL: SCROLLABLE GRAPHICS VIEWPORT
+with right_panel:
+    st.subheader("🖼️ Document Reference Panel")
+    view_toggle = st.radio("Display View Mode", options=["1. Roofr Measurement Blueprint", "2. Signed Homeowner Contract"], horizontal=True)
+    st.markdown("---")
+    
+    target_bytes = roofr_pages_bytes if "Roofr" in view_toggle else contract_pages_bytes
+    label_tag = "Roofr Takeoff Blueprint" if "Roofr" in view_toggle else "Signed Homeowner Contract"
+    
+    if target_bytes is not None:
+        try:
+            with st.spinner("Compiling continuous view layouts..."):
+                html_rendered = cached_pdf_to_html_viewport(target_bytes, label_tag)
+                components.html(html_rendered, height=770, scrolling=False)
+        except Exception as err:
+            st.caption("Rendering visual reference layout frame...")
+    else:
+        st.info(f"💡 Drop your PDF files into the uploader matrix above to unlock the scrollable window for this document.")
+
+# 📋 BOTTOM ROW: DRAFT ORDER TABLE ENGINE
+st.markdown("---")
+st.header("2. Calculated Material Order Manifest")
+
+manifest_ready = (material_type == "Mod Bit" and (mod_sq > 0 or (mod_eaves + mod_rakes) > 0)) or (material_type != "Mod Bit" and sq_count > 0)
+
+if manifest_ready:
+    if material_type == "Mod Bit":
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Cap Sheet Rolls", f"{cap_rolls} Rolls")
+        c2.metric(f"{mod_bit_base_type.split(' (')[0]} Rolls", f"{base_rolls} Rolls")
+        c3.metric("Drip Edge Pieces", f"{mb_drip_pieces} Pcs")
+    else:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric(f"Field SQ (+{waste_pct:.0f}% Waste)", f"{total_squares_with_waste:.1f} SQ")
+        if material_type == "Tile":
+            c2.metric("Pallets Needed", f"{pallets_needed:g} Pallets")
+            c4.metric("Hip/Ridge Closures", f"{ridge_bundles} Bundles" if is_flat_tile else f"{hip_bundles} / {ridge_bundles} Bundles")
+        else:
+            c2.metric("Field Bundles", f"{field_bundles} Bundles")
+            c4.metric("Hip/Ridge Cap Bundles", f"{hip_ridge_bundles} Bundles")
+        c3.metric("Underlayment Rolls", f"{underlayment_rolls} Rolls")
+
+    st.table({"Material Item Description": descriptions, "Calculated Quantity": quantities})
+    
+    st.header("3. Actions")
+    job_number = st.text_input("Job # (JobNimbus System Match)", placeholder="e.g., RR-1995")
+    crew_notes = st.text_area("Production / Delivery Notes", placeholder="e.g., alley drop-off, roof loaded...", height=100)
+
+    # 🚀 LIVE CRM INJECTION GATEWAY
+    if st.button("Confirm & Push Material Order inside JobNimbus"):
+        if not job_number:
+            st.error("⚠️ The 'Job #' input field is empty. Please enter your sequential Job ID number.")
+        elif not JN_TOKEN:
+            st.error("⚠️ Your 'JOBNIMBUS_TOKEN' is missing or completely blank inside your Streamlit App Secrets panel.")
+        else:
+            headers = {
+                "Authorization": f"Bearer {JN_TOKEN}",
+                "Content-Type": "application/json"
+            }
+            
+            with st.spinner("Querying system database directly for verification key..."):
+                resolved_jnid = lookup_internal_jnid(job_number, headers)
+                
+            if not resolved_jnid:
+                st.error(f"❌ Could not find an active file matching Job #{job_number} inside your JobNimbus database. Make sure that job number is completely accurate inside your CRM boards.")
+            else:
+                with st.spinner("Injecting manifest items directly to your JobNimbus file..."):
+                    try:
+                        line_items_api = []
+                        for desc, qty in zip(descriptions, quantities):
+                            extracted_qty = float(re.findall(r"[-+]?\d*\.\d+|\d+", qty)[0]) if re.findall(r"[-+]?\d*\.\d+|\d+", qty) else 1.0
+                            line_items_api.append({
+                                "name": desc,
+                                "description": f"Calculated by RealRoofing Assistant Engine. Profile Selection: {final_tile}.",
+                                "quantity": extracted_qty,
+                                "item_type": "material"
+                            })
+                        
+                        payload = {
+                            "name": f"Material Order Layout - PO {final_po}",
+                            "related": [resolved_jnid], 
+                            "status": 1, 
+                            "type": "estimate",  
+                            "record_type_name": "Estimate", 
+                            "po_number": final_po,       
+                            "internal_note": f"CONTRACTED SPECS -- Tile: {final_tile} | Birdstop Color: {final_birdstop} | Drip Edge Color: {final_drip}. Field Instructions: {crew_notes.strip()}",
+                            "items": line_items_api
+                        }
+                        
+                        response = requests.post("https://app.jobnimbus.com/api1/estimates", json=payload, headers=headers)
+                        
+                        if response.status_code in [200, 201]:
+                            st.success(f"🚀 Success! Material Order draft successfully created under Job **#{job_number}**. Open it inside JobNimbus and select 'Convert to Material Order' to finalize!")
+                        else:
+                            st.error(f"❌ JobNimbus API rejected this order formatting. Error Code: {response.status_code}. Details: {response.text}")
+                    except Exception as err:
+                        st.error(f"Could not reach JobNimbus cloud database servers. Error: {err}")
+else:
+    st.info("💡 Drop a takeoff report into the hub at the top of the page to populate the order manifests.")
+    
