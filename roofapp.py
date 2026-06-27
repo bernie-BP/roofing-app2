@@ -92,44 +92,29 @@ def ask_ai_to_extract_contract_metadata(contract_text):
 def lookup_internal_jnid(job_num_str, headers):
     """Queries JobNimbus database using exact, case-normalized, and sequential fallback strategies."""
     cleaned_num = str(job_num_str).strip().lstrip('#')
-    
     if "_" in cleaned_num and len(cleaned_num) >= 12:
         return cleaned_num
         
-    search_variants = [
-        cleaned_num,
-        cleaned_num.lower(),
-        cleaned_num.upper()
-    ]
-    
+    search_variants = [cleaned_num, cleaned_num.lower(), cleaned_num.upper()]
     digits_only = "".join(filter(str.isdigit, cleaned_num))
     if digits_only and digits_only != cleaned_num:
         search_variants.append(digits_only)
         
     for variant in list(dict.fromkeys(search_variants)):
-        filter_payload = json.dumps({
-            "must": [
-                {"term": {"number": variant}}
-            ]
-        })
-        
+        filter_payload = json.dumps({"must": [{"term": {"number": variant}}]})
         try:
             j_res = requests.get(f"https://app.jobnimbus.com/api1/jobs?filter={filter_payload}", headers=headers, timeout=6)
             if j_res.status_code == 200:
                 results = j_res.json().get("results", [])
-                if results:
-                    return results[0].get("jnid")
-        except Exception:
-            pass
+                if results: return results[0].get("jnid")
+        except Exception: pass
 
         try:
             c_res = requests.get(f"https://app.jobnimbus.com/api1/contacts?filter={filter_payload}", headers=headers, timeout=6)
             if c_res.status_code == 200:
                 results = c_res.json().get("results", [])
-                if results:
-                    return results[0].get("jnid")
-        except Exception:
-            pass
+                if results: return results[0].get("jnid")
+        except Exception: pass
 
     try:
         for endpoint in ["jobs", "contacts"]:
@@ -137,14 +122,21 @@ def lookup_internal_jnid(job_num_str, headers):
             if res.status_code == 200:
                 for record in res.json().get("results", []):
                     rec_num = str(record.get("number", "")).strip().lower()
-                    rec_id = str(record.get("recid", "")).strip()
                     target = cleaned_num.lower()
-                    if target in rec_num or rec_num in target or target == rec_id:
+                    if target in rec_num or rec_num in target:
                         return record.get("jnid")
-    except Exception:
-        pass
-        
+    except Exception: pass
     return None
+
+# --- 📦 LIVE PRODUCT CATALOG DATA SYNC ---
+def fetch_jobnimbus_products(headers):
+    """Downloads active item SKU configurations from the target CRM workspace."""
+    try:
+        res = requests.get("https://app.jobnimbus.com/api1/products?size=1000", headers=headers, timeout=8)
+        if res.status_code == 200:
+            return res.json().get("results", [])
+    except Exception: pass
+    return []
 
 # --- 🧠 STATE MANAGEMENT INITIALIZATION ---
 if "scanned_vals" not in st.session_state:
@@ -181,19 +173,16 @@ else:
     with up_col2:
         uploaded_contract = st.file_uploader("2. Upload Signed Homeowner Contract (PDF)", type=["pdf"])
     
-    # 📐 ROOFR DATA PARSING GATEWAY
     if uploaded_roofr is not None:
         roofr_pages_bytes = uploaded_roofr.getvalue()
         current_roofr_hash = f"{uploaded_roofr.name}_{len(roofr_pages_bytes)}"
-        
         if st.session_state.processed_roofr_hash != current_roofr_hash:
             try:
                 reader = pypdf.PdfReader(BytesIO(roofr_pages_bytes))
                 full_text = ""
                 for page in reader.pages:
                     text_content = page.extract_text()
-                    if text_content:
-                        full_text += text_content + "\n"
+                    if text_content: full_text += text_content + "\n"
                 
                 def parse_metric(pattern, text):
                     match = re.search(pattern, text, re.IGNORECASE)
@@ -201,12 +190,8 @@ else:
 
                 raw_pitched_ft = parse_metric(r"Pitched\s*Roof\s*Area\s*[:\-]?\s*([\d\.,]+)\s*sq", full_text)
                 raw_flat_ft = parse_metric(r"Flat\s*Roof\s*Area\s*[:\-]?\s*([\d\.,]+)\s*sq", full_text)
-                
-                if raw_pitched_ft == "0":
-                    raw_pitched_ft = parse_metric(r"Pitched\s*Area\s*[:\-]?\s*([\d\.,]+)\s*SQ", full_text)
-                if raw_flat_ft == "0":
-                    raw_flat_ft = parse_metric(r"Flat\s*Area\s*[:\-]?\s*([\d\.,]+)\s*SQ", full_text)
-                
+                if raw_pitched_ft == "0": raw_pitched_ft = parse_metric(r"Pitched\s*Area\s*[:\-]?\s*([\d\.,]+)\s*SQ", full_text)
+                if raw_flat_ft == "0": raw_flat_ft = parse_metric(r"Flat\s*Area\s*[:\-]?\s*([\d\.,]+)\s*SQ", full_text)
                 if raw_pitched_ft == "0" and raw_flat_ft == "0":
                     universal_ft = parse_metric(r"(?:Total Area|Squares)\s*[:\-]?\s*([\d\.,]+)\s*sq", full_text)
                     raw_pitched_ft = universal_ft
@@ -219,33 +204,26 @@ else:
                 st.session_state.scanned_vals["hips"] = parse_metric(r"Hips\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
                 st.session_state.scanned_vals["ridges"] = parse_metric(r"Ridges?\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
                 st.session_state.scanned_vals["rakes"] = parse_metric(r"Rakes\s*[:\-]?\s*([\d\.,]+)\s*f", full_text)
-                
                 st.session_state.processed_roofr_hash = current_roofr_hash
-                st.success("✅ Roofr measurements scanned! Adjustments can be made below.")
-            except Exception as e:
-                st.error(f"Could not parse Roofr blueprint text. Error: {e}")
+                st.success("✅ Roofr measurements scanned!")
+            except Exception as e: st.error(f"Could not parse Roofr blueprint text. Error: {e}")
 
-    # 🤖 AI CUSTOMER CONTRACT PROCESSING GATEWAY (Gemini Powered)
     if uploaded_contract is not None:
         contract_pages_bytes = uploaded_contract.getvalue()
         current_contract_hash = f"{uploaded_contract.name}_{len(contract_pages_bytes)}"
-        
         if st.session_state.processed_contract_hash != current_contract_hash:
             try:
                 contract_reader = pypdf.PdfReader(BytesIO(contract_pages_bytes))
                 contract_text = ""
                 for page in contract_reader.pages:
                     txt = page.extract_text()
-                    if txt:
-                        contract_text += txt + "\n"
-                
+                    if txt: contract_text += txt + "\n"
                 with st.spinner("AI is analyzing signed contract for customer specs & colors..."):
                     ai_extracted = ask_ai_to_extract_contract_metadata(contract_text)
                     st.session_state.ai_metadata = ai_extracted
                     st.session_state.processed_contract_hash = current_contract_hash
                     st.success("✅ Signed contract processed by AI engine!")
-            except Exception as e:
-                st.error(f"Could not analyze customer contract file. Error: {e}")
+            except Exception as e: st.error(f"Could not analyze customer contract file. Error: {e}")
 
 st.markdown("---")
 
@@ -260,12 +238,10 @@ with left_panel:
     job_type = st.radio("Job Type", options=["New Tile", "Re-Roof"], index=1, horizontal=True) if material_type == "Tile" else None
     
     st.markdown("### 📏 Dimensions")
-    
     if material_type == "Mod Bit":
         mod_sq = get_num(st.text_input("Square Count (SQ)", value=st.session_state.scanned_vals["flat_sq"]))
         mod_eaves = get_num(st.text_input("Eaves (Linear Feet)", value=st.session_state.scanned_vals["eaves"]))
         mod_rakes = get_num(st.text_input("Rakes (Linear Feet)", value=st.session_state.scanned_vals["rakes"]))
-        
         CAPSHEET_COLORS = ["Buff", "Grey Slate", "Black", "White", "Weatherwood"]
         cap_color = st.selectbox("Cap Sheet Color", CAPSHEET_COLORS)
         mod_bit_base_type = st.selectbox("Select Base Layer Material Type", options=["Base Sheet (2 SQ per roll)", "SAV 9\" Self-Adhered (66 LF per roll)"])
@@ -276,10 +252,10 @@ with left_panel:
         
         if mod_bit_base_type == "Base Sheet (2 SQ per roll)":
             base_rolls = math.ceil(mod_sq / 2) if mod_sq > 0 else 0
-            base_description, base_quantity_str = "Polyglass Base Sheet", f"{base_rolls} Rolls (covers {base_rolls * 2} SQ)"
+            base_description, base_quantity_str = "Polyglass Base Sheet", f"{base_rolls} Rolls"
         else:
             base_rolls = math.ceil((mod_eaves + mod_rakes) / 66) if (mod_eaves + mod_rakes) > 0 else 0
-            base_description, base_quantity_str = 'Polyglass SAV 9" Self-Adhered (66 LF/roll)', f"{base_rolls} Rolls ({mod_eaves + mod_rakes:.0f} LF @ 66 LF/roll)"
+            base_description, base_quantity_str = 'Polyglass SAV 9" Self-Adhered', f"{base_rolls} Rolls"
             
         descriptions = [f"Polyglass Cap Sheet — {cap_color}", base_description, "Drip Edge (10ft sections, eaves only)"]
         quantities = [f"{cap_rolls} Rolls", f"{base_rolls} Rolls", f"{mb_drip_pieces} Pcs"]
@@ -305,10 +281,8 @@ with left_panel:
         
         if material_type == "Tile":
             total_squares_with_waste = sq_count * WASTE_FACTOR
-            if job_type == "Re-Roof":
-                pallets_needed = 0.5 if sq_count < 20 else math.ceil((sq_count / 20) * 2) / 2
-            else:
-                pallets_needed = math.ceil(total_squares_with_waste / 2.97)
+            if job_type == "Re-Roof": pallets_needed = 0.5 if sq_count < 20 else math.ceil((sq_count / 20) * 2) / 2
+            else: pallets_needed = math.ceil(total_squares_with_waste / 2.97)
                 
             tile_drip_pieces = (math.ceil(eaves / drip_edge_length) if eaves > 0 else 0) + 2
             birdstop_pieces = (math.ceil(eaves / 10) if eaves > 0 else 0) + 2
@@ -327,7 +301,6 @@ with left_panel:
             field_bundles = math.ceil(total_squares_with_waste * 3)
             hip_ridge_bundles = math.ceil(hip_ridge_lf / 33) if hip_ridge_lf > 0 else 0
             starter_bundles = math.ceil(eaves / 100) if eaves > 0 else 0
-            
             field_nail_boxes = math.ceil(sq_count / 20) if sq_count > 0 else 0
             eave_nail_boxes  = math.ceil(sq_count / 20) if sq_count > 0 else 0
             cap_nail_boxes   = math.ceil(sq_count / 20) if sq_count > 0 else 0
@@ -339,120 +312,11 @@ with left_panel:
         descriptions.append("Valley Flashing (W-Valley)")
         quantities.append(f"{valley_pieces} Sections")
 
-    # --- 🔍 HUMAN-IN-THE-LOOP AI VALIDATION PANEL ---
     st.markdown("---")
     st.subheader("📝 Verify Contract Selections")
     ai_vals = st.session_state.ai_metadata
     
     col_m1, col_m2 = st.columns(2)
     with col_m1:
-        final_po = st.text_input("PO Number / Reference", value=ai_vals.get("po", ""), help="Extracted automatically from the signed contract.")
-        final_tile = st.text_input("Contracted Tile/Product Profile", value=ai_vals.get("tile_type", ""))
-    with col_m2:
-        final_birdstop = st.text_input("Birdstop Color Spec", value=ai_vals.get("birdstop", "Black"))
-        final_drip = st.text_input("Drip Edge Color Spec", value=ai_vals.get("drip_edge", "White"))
-
-# 🖼️ RIGHT PANEL: SCROLLABLE GRAPHICS VIEWPORT
-with right_panel:
-    st.subheader("🖼️ Document Reference Panel")
-    view_toggle = st.radio("Display View Mode", options=["1. Roofr Measurement Blueprint", "2. Signed Homeowner Contract"], horizontal=True)
-    st.markdown("---")
-    
-    target_bytes = roofr_pages_bytes if "Roofr" in view_toggle else contract_pages_bytes
-    label_tag = "Roofr Takeoff Blueprint" if "Roofr" in view_toggle else "Signed Homeowner Contract"
-    
-    if target_bytes is not None:
-        try:
-            with st.spinner("Compiling continuous view layouts..."):
-                html_rendered = cached_pdf_to_html_viewport(target_bytes, label_tag)
-                components.html(html_rendered, height=770, scrolling=False)
-        except Exception as err:
-            st.caption("Rendering visual reference layout frame...")
-    else:
-        st.info(f"💡 Drop your PDF files into the uploader matrix above to unlock the scrollable window for this document.")
-
-# 📋 BOTTOM ROW: DRAFT ORDER TABLE ENGINE
-st.markdown("---")
-st.header("2. Calculated Material Order Manifest")
-
-manifest_ready = (material_type == "Mod Bit" and (mod_sq > 0 or (mod_eaves + mod_rakes) > 0)) or (material_type != "Mod Bit" and sq_count > 0)
-
-if manifest_ready:
-    if material_type == "Mod Bit":
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Cap Sheet Rolls", f"{cap_rolls} Rolls")
-        c2.metric(f"{mod_bit_base_type.split(' (')[0]} Rolls", f"{base_rolls} Rolls")
-        c3.metric("Drip Edge Pieces", f"{mb_drip_pieces} Pcs")
-    else:
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric(f"Field SQ (+{waste_pct:.0f}% Waste)", f"{total_squares_with_waste:.1f} SQ")
-        if material_type == "Tile":
-            c2.metric("Pallets Needed", f"{pallets_needed:g} Pallets")
-            c4.metric("Hip/Ridge Closures", f"{ridge_bundles} Bundles" if is_flat_tile else f"{hip_bundles} / {ridge_bundles} Bundles")
-        else:
-            c2.metric("Field Bundles", f"{field_bundles} Bundles")
-            c4.metric("Hip/Ridge Cap Bundles", f"{hip_ridge_bundles} Bundles")
-        c3.metric("Underlayment Rolls", f"{underlayment_rolls} Rolls")
-
-    st.table({"Material Item Description": descriptions, "Calculated Quantity": quantities})
-    
-    st.header("3. Actions")
-    job_number = st.text_input("Job # (JobNimbus System Match)", placeholder="e.g., RR-1995")
-    crew_notes = st.text_area("Production / Delivery Notes", placeholder="e.g., alley drop-off, roof loaded...", height=100)
-
-    # 🚀 LIVE CRM INJECTION GATEWAY
-    if st.button("Confirm & Push Material Order inside JobNimbus"):
-        if not job_number:
-            st.error("⚠️ The 'Job #' input field is empty. Please enter your sequential Job ID number.")
-        elif not JN_TOKEN:
-            st.error("⚠️ Your 'JOBNIMBUS_TOKEN' is missing or completely blank inside your Streamlit App Secrets panel.")
-        else:
-            headers = {
-                "Authorization": f"Bearer {JN_TOKEN}",
-                "Content-Type": "application/json"
-            }
-            
-            with st.spinner("Querying system database directly for verification key..."):
-                resolved_jnid = lookup_internal_jnid(job_number, headers)
-                
-            if not resolved_jnid:
-                st.error(f"❌ Could not find an active file matching Job #{job_number} inside your JobNimbus database. Make sure that job number is completely accurate inside your CRM boards.")
-            else:
-                with st.spinner("Injecting manifest items directly to your JobNimbus file..."):
-                    try:
-                        line_items_api = []
-                        for desc, qty in zip(descriptions, quantities):
-                            extracted_qty = float(re.findall(r"[-+]?\d*\.\d+|\d+", qty)[0]) if re.findall(r"[-+]?\d*\.\d+|\d+", qty) else 1.0
-                            line_items_api.append({
-                                "name": desc,
-                                "description": f"Calculated by RealRoofing Assistant Engine. Profile Selection: {final_tile}.",
-                                "quantity": extracted_qty,
-                                "item_type": "material"
-                            })
-                        
-                        # 📑 FIXED PAYLOAD: Mapped "related" natively as an explicit array of keyed data tracking objects
-                        payload = {
-                            "name": f"Material Order Layout - PO {final_po}",
-                            "related": [
-                                {
-                                    "id": resolved_jnid
-                                }
-                            ], 
-                            "status": 1, 
-                            "type": "estimate",  
-                            "record_type_name": "Estimate", 
-                            "po_number": final_po,       
-                            "internal_note": f"CONTRACTED SPECS -- Tile: {final_tile} | Birdstop Color: {final_birdstop} | Drip Edge Color: {final_drip}. Field Instructions: {crew_notes.strip()}",
-                            "items": line_items_api
-                        }
-                        
-                        response = requests.post("https://app.jobnimbus.com/api1/v2/estimates", json=payload, headers=headers)
-                        
-                        if response.status_code in [200, 201]:
-                            st.success(f"🚀 Success! Material Order draft successfully created under Job **#{job_number}**. Open it inside JobNimbus and select 'Convert to Material Order' to finalize!")
-                        else:
-                            st.error(f"❌ JobNimbus API rejected this order formatting. Error Code: {response.status_code}. Details: {response.text}")
-                    except Exception as err:
-                        st.error(f"Could not reach JobNimbus cloud database servers. Error: {err}")
-else:
-    st.info("💡 Drop a takeoff report into the hub at the top of the page to populate the order manifests.")
+        final_po = st.text_input("PO Number / Reference", value=ai_vals.get("po", ""))
+        final_tile = st.text_input("Contracted Tile/Product Profile", value=ai_vals
