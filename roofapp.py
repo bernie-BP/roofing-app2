@@ -128,16 +128,6 @@ def lookup_internal_jnid(job_num_str, headers):
     except Exception: pass
     return None
 
-# --- 📦 LIVE PRODUCT CATALOG DATA SYNC ---
-def fetch_jobnimbus_products(headers):
-    """Downloads active item SKU configurations from the target CRM workspace."""
-    try:
-        res = requests.get("https://app.jobnimbus.com/api1/products?size=1000", headers=headers, timeout=8)
-        if res.status_code == 200:
-            return res.json().get("results", [])
-    except Exception: pass
-    return []
-
 # --- 🧠 STATE MANAGEMENT INITIALIZATION ---
 if "scanned_vals" not in st.session_state:
     st.session_state.scanned_vals = {"pitched_sq": "0.0", "flat_sq": "0.0", "eaves": "0.0", "valleys": "0.0", "hips": "0.0", "ridges": "0.0", "rakes": "0.0"}
@@ -367,8 +357,8 @@ if manifest_ready:
     job_number = st.text_input("Job # (JobNimbus System Match)", placeholder="e.g., RR-1995")
     crew_notes = st.text_area("Production / Delivery Notes", placeholder="e.g., alley drop-off, roof loaded...", height=100)
 
-    # 🚀 LIVE CRM INJECTION GATEWAY
-    if st.button("Confirm & Push Material Order inside JobNimbus"):
+    # 🚀 LIVE CRM INJECTION GATEWAY (BULLETPROOF NOTE WORKFLOW)
+    if st.button("Confirm & Push Material Order Note to JobNimbus"):
         if not job_number: st.error("⚠️ The 'Job #' input field is empty.")
         elif not JN_TOKEN: st.error("⚠️ Your 'JOBNIMBUS_TOKEN' is blank inside your Streamlit App Secrets panel.")
         else:
@@ -379,65 +369,33 @@ if manifest_ready:
             if not resolved_jnid:
                 st.error(f"❌ Could not find an active file matching Job #{job_number} inside your JobNimbus database.")
             else:
-                with st.spinner("Syncing item definitions with your Products & Services catalog..."):
-                    crm_catalog = fetch_jobnimbus_products(headers)
-                    catalog_map = {item.get("name", "").lower().strip(): item.get("jnid") for item in crm_catalog if item.get("jnid")}
-
-                with st.spinner("Injecting catalog manifest items directly to your JobNimbus file..."):
+                with st.spinner("Formatting and pushing Bulletproof Production Note..."):
                     try:
-                        line_items_api = []
+                        # Format the note cleanly using Markdown spacing
+                        note_text = f"**MATERIAL ORDER SUMMARY — PO: {final_po}**\n\n"
+                        note_text += f"• Profile Selection: {final_tile}\n"
+                        note_text += f"• Birdstop Color: {final_birdstop}\n"
+                        note_text += f"• Drip Edge Color: {final_drip}\n\n"
+                        note_text += "-- CALCULATED QUANTITIES --\n"
+                        
                         for desc, qty in zip(descriptions, quantities):
-                            extracted_qty = float(re.findall(r"[-+]?\d*\.\d+|\d+", qty)[0]) if re.findall(r"[-+]?\d*\.\d+|\d+", qty) else 1.0
+                            note_text += f"• {desc}: {qty}\n"
                             
-                            matched_id = None
-                            desc_clean = desc.lower().strip()
-                            for prod_name, p_jnid in catalog_map.items():
-                                if prod_name in desc_clean or desc_clean in prod_name:
-                                    matched_id = p_jnid
-                                    break
+                        if crew_notes.strip():
+                            note_text += f"\n-- FIELD NOTES --\n{crew_notes.strip()}"
                             
-                            if not matched_id and crm_catalog:
-                                for prod_name, p_jnid in catalog_map.items():
-                                    if "material" in prod_name or "misc" in prod_name or "roof" in prod_name:
-                                        matched_id = p_jnid
-                                        break
-                                if not matched_id:
-                                    matched_id = crm_catalog[0].get("jnid")
-
-                            # 📑 FIXED: Added explicitly required financial parameters (unit_price, price, cost)
-                            item_payload = {
-                                "name": desc,
-                                "description": f"{desc} (True Takeoff Specification)",
-                                "quantity": extracted_qty,
-                                "unit_price": 0.0,
-                                "price": 0.0,
-                                "cost": 0.0
-                            }
-                            
-                            if matched_id:
-                                item_payload["product_id"] = matched_id
-                                
-                            line_items_api.append(item_payload)
-
-                        if not line_items_api:
-                            st.error("❌ Mapped manifest generated 0 valid line items. Please verify your JobNimbus account has items set up under 'Products & Services'.")
+                        # Activity (Note) Payload Injection
+                        payload = {
+                            "record_type_name": "Note",
+                            "note": note_text,
+                            "related": [resolved_jnid]
+                        }
+                        
+                        response = requests.post("https://app.jobnimbus.com/api1/activities", json=payload, headers=headers)
+                        
+                        if response.status_code in [200, 201]:
+                            st.success(f"🚀 Success! Takeoff Note pinned directly to Job **#{job_number}**. Open JobNimbus to instantly transfer these numbers to your standard Material Order template!")
                         else:
-                            payload = {
-                                "name": f"Material Order Layout - PO {final_po}",
-                                "related": [{"id": resolved_jnid}], 
-                                "status": 1, 
-                                "type": "estimate",  
-                                "record_type_name": "Estimate", 
-                                "po_number": final_po,       
-                                "internal_note": f"CONTRACTED SPECS -- Tile: {final_tile} | Birdstop Color: {final_birdstop} | Drip Edge Color: {final_drip}. Field Instructions: {crew_notes.strip()}",
-                                "line_items": line_items_api,  
-                                "items": line_items_api       
-                            }
-                            
-                            response = requests.post("https://app.jobnimbus.com/api1/v2/estimates", json=payload, headers=headers)
-                            if response.status_code in [200, 201]:
-                                st.success(f"🚀 Success! Material Order template created under Job **#{job_number}**. Open it in JobNimbus and select 'Convert to Material Order' to generate your final order!")
-                            else:
-                                st.error(f"❌ JobNimbus API rejected this order formatting. Error Code: {response.status_code}. Details: {response.text}")
+                            st.error(f"❌ JobNimbus API rejected this note formatting. Error Code: {response.status_code}. Details: {response.text}")
                     except Exception as err: st.error(f"Could not reach JobNimbus cloud database servers. Error: {err}")
 else: st.info("💡 Drop a takeoff report into the hub at the top of the page to populate the order manifests.")
