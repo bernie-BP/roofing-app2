@@ -195,4 +195,160 @@ with left_panel:
             base_description, base_quantity_str = 'Polyglass SAV 9" Self-Adhered', f"{base_rolls}"
             
         descriptions = [f"Polyglass Cap Sheet — {cap_color}", base_description, "Drip Edge (10ft)"]
-        quantities = [f
+        quantities = [f"{cap_rolls}", f"{base_rolls}", f"{mb_drip_pieces}"]
+    else:
+        sub_col1, sub_col2 = st.columns(2)
+        with sub_col1:
+            sq_count = get_num(st.text_input("Square Count (SQ)", value=st.session_state.scanned_vals["pitched_sq"]))
+            product = st.selectbox("Product Profile", ["Eagle (S-Profile)", "Eagle (W-Profile)", "Eagle (Flat)", "Westlake (S-Profile)", "Westlake (W-Profile)", "Westlake (Flat)"] if material_type == "Tile" else ["GAF Timberline HDZ", "GAF Royal Sovereign", "GAF Timberline UHDZ"])
+            eaves = get_num(st.text_input("Eaves (Linear Feet)", value=st.session_state.scanned_vals["eaves"]))
+            valleys = get_num(st.text_input("Valleys (Linear Feet)", value=st.session_state.scanned_vals["valleys"]))
+        with sub_col2:
+            hips = get_num(st.text_input("Hips (Linear Feet)", value=st.session_state.scanned_vals["hips"]))
+            ridges = get_num(st.text_input("Ridges (Linear Feet)", value=st.session_state.scanned_vals["ridges"]))
+            rakes = get_num(st.text_input("Rakes (Linear Feet)", value=st.session_state.scanned_vals["rakes"]))
+            waste_pct = get_num(st.text_input("Waste Factor (%)", value="10"))
+
+        underlayment_roll_size = st.selectbox("Underlayment Roll Size", options=[2, 5, 10], format_func=lambda x: f"{x} SQ roll")
+        drip_edge_length = 10
+        WASTE_FACTOR = 1 + (waste_pct / 100)
+        hip_ridge_lf = hips + ridges
+        underlayment_rolls = math.ceil((sq_count * 1.15) / underlayment_roll_size)
+        valley_pieces = math.ceil(valleys / 10) if valleys > 0 else 0
+        
+        if material_type == "Tile":
+            total_squares_with_waste = sq_count * WASTE_FACTOR
+            pallets_needed = (0.5 if sq_count < 20 else math.ceil((sq_count / 20) * 2) / 2) if job_type == "Re-Roof" else math.ceil(total_squares_with_waste / 2.97)
+                
+            tile_drip_pieces = (math.ceil(eaves / drip_edge_length) if eaves > 0 else 0) + 2
+            birdstop_pieces = (math.ceil(eaves / 10) if eaves > 0 else 0) + 2
+            is_flat_tile = "Flat" in product
+            batten_bundles = math.ceil(sq_count)
+            hip_bundles = 0 if is_flat_tile else math.ceil(hips / 25)
+            ridge_bundles = math.ceil(hip_ridge_lf / 100) if is_flat_tile else math.ceil(ridges / 50)
+            
+            hip_ridge_desc = ["Hip Closures", "Ridge Closures"] if not is_flat_tile else ["Hip & Ridge Closures"]
+            hip_ridge_qty = [f"{hip_bundles}", f"{ridge_bundles}"] if not is_flat_tile else [f"{ridge_bundles}"]
+            descriptions = [f"Field Tile: {product}", f"Tile Underlayment ({underlayment_roll_size} SQ)", *hip_ridge_desc, "Roof Battens", "Birdstop Pieces", "Drip Edge"]
+            quantities = [f"{pallets_needed:g}", f"{underlayment_rolls}", *hip_ridge_qty, f"{batten_bundles}", f"{birdstop_pieces}", f"{tile_drip_pieces}"]
+        else:
+            total_squares_with_waste = sq_count * WASTE_FACTOR
+            shingle_drip_pieces = (math.ceil((eaves + rakes) / drip_edge_length) if (eaves + rakes) > 0 else 0) + 2
+            field_bundles = math.ceil(total_squares_with_waste * 3)
+            hip_ridge_bundles = math.ceil(hip_ridge_lf / 33) if hip_ridge_lf > 0 else 0
+            starter_bundles = math.ceil(eaves / 100) if eaves > 0 else 0
+            field_nail_boxes = math.ceil(sq_count / 20) if sq_count > 0 else 0
+            eave_nail_boxes  = math.ceil(sq_count / 20) if sq_count > 0 else 0
+            cap_nail_boxes   = math.ceil(sq_count / 20) if sq_count > 0 else 0
+            
+            descriptions = [f"Field Shingles: {product}", f"Underlayment ({underlayment_roll_size} SQ)", "Hip & Ridge Cap", "Starter Strip", "Drip Edge Pieces", "Shingle Field Nails", "Eave Coil Nails", "Plastic Cap Nails"]
+            quantities = [f"{field_bundles}", f"{underlayment_rolls}", f"{hip_ridge_bundles}", f"{starter_bundles}", f"{shingle_drip_pieces}", f"{field_nail_boxes}", f"{eave_nail_boxes}", f"{cap_nail_boxes}"]
+
+    if material_type != "Mod Bit" and valleys > 0:
+        descriptions.append("Valley Flashing (W-Valley)")
+        quantities.append(f"{valley_pieces}")
+
+    st.markdown("---")
+    st.subheader("📝 Verify Contract Selections")
+    ai_vals = st.session_state.ai_metadata
+    
+    col_m1, col_m2 = st.columns(2)
+    with col_m1:
+        final_po = st.text_input("PO Number / Reference", value=ai_vals.get("po", ""))
+        final_tile = st.text_input("Contracted Tile/Product Profile", value=ai_vals.get("tile_type", ""))
+    with col_m2:
+        final_birdstop = st.text_input("Birdstop Color Spec", value=ai_vals.get("birdstop", "Black"))
+        final_drip = st.text_input("Drip Edge Color Spec", value=ai_vals.get("drip_edge", "White"))
+
+# 🖼️ RIGHT PANEL: SCROLLABLE GRAPHICS VIEWPORT
+with right_panel:
+    st.subheader("🖼️ Document Reference Panel")
+    view_toggle = st.radio("Display View Mode", options=["1. Roofr Measurement Blueprint", "2. Signed Homeowner Contract", "3. Blank Template Preview"], horizontal=True)
+    st.markdown("---")
+    
+    if "Template" in view_toggle:
+        target_bytes = template_pages_bytes
+        label_tag = "Blank MO Template"
+    else:
+        target_bytes = roofr_pages_bytes if "Roofr" in view_toggle else contract_pages_bytes
+        label_tag = "Roofr Takeoff Blueprint" if "Roofr" in view_toggle else "Signed Homeowner Contract"
+    
+    if target_bytes is not None:
+        try:
+            with st.spinner("Compiling continuous view layouts..."):
+                html_rendered = cached_pdf_to_html_viewport(target_bytes, label_tag)
+                components.html(html_rendered, height=770, scrolling=False)
+        except Exception as err: st.caption("Rendering visual reference layout frame...")
+    else: st.info(f"💡 Drop your PDF files into the uploader matrix above to unlock the scrollable window for this document.")
+
+# 📋 BOTTOM ROW: DRAFT ORDER TABLE ENGINE & PDF GENERATOR
+st.markdown("---")
+st.header("2. Calculated Material Order Manifest")
+manifest_ready = (material_type == "Mod Bit" and (mod_sq > 0 or (mod_eaves + mod_rakes) > 0)) or (material_type != "Mod Bit" and sq_count > 0)
+
+if manifest_ready:
+    st.table({"Material Item Description": descriptions, "Calculated Quantity": quantities})
+    
+    st.header("3. Generate Editable PDF Order")
+    job_number = st.text_input("Job # (For PDF Generation)", placeholder="e.g., RR-1997")
+    
+    # 🛠️ TEMPORARY DEVELOPER TOOL: Find the hidden PDF field names
+    if template_pages_bytes:
+        with st.expander("🛠️ Developer Tool: Map PDF Field Names"):
+            st.write("These are the hidden box names inside your uploaded PDF. We will use these to map the exact calculations to the right rows.")
+            try:
+                reader = pypdf.PdfReader(BytesIO(template_pages_bytes))
+                fields = reader.get_fields()
+                if fields:
+                    field_names = list(fields.keys())
+                    st.json(field_names)
+                else:
+                    st.warning("No fillable AcroForm text boxes were found in this PDF. It might be a flat, scanned document.")
+            except Exception as e:
+                st.error(f"Could not read PDF fields: {e}")
+
+    # 🚀 PDF GENERATION ENGINE
+    if st.button("Generate & Download Filled PDF"):
+        if not template_pages_bytes:
+            st.error("⚠️ Please upload your Blank MO Template in the uploader hub at the top of the page first.")
+        else:
+            with st.spinner("Generating editable PDF..."):
+                try:
+                    reader = pypdf.PdfReader(BytesIO(template_pages_bytes))
+                    writer = pypdf.PdfWriter()
+                    writer.append_pages_from_reader(reader)
+                    
+                    # 📝 THIS IS WHERE WE MAP OUR DATA TO THE PDF BOXES
+                    # Note: These keys (e.g., 'Job_Number_Field') are placeholders. 
+                    # Once you see the real field names in the Developer Tool above, we will update these!
+                    form_data_mapping = {
+                        "Job_Number_Field": job_number,
+                        "PO_Field": final_po,
+                        "Drip_Edge_Color": final_drip,
+                        "Birdstop_Color": final_birdstop,
+                        "Tile_Manufacturer_Field": "Eagle" if "Eagle" in final_tile else "Westlake",
+                        "Tile_Profile_Field": final_tile,
+                        # Example of mapping line items:
+                        # "Row1_Item_Field": descriptions[0],
+                        # "Row1_Qty_Field": quantities[0],
+                    }
+                    
+                    # Inject data into the PDF while keeping it editable
+                    for page in writer.pages:
+                        writer.update_page_form_field_values(page, form_data_mapping)
+                    
+                    output_stream = BytesIO()
+                    writer.write(output_stream)
+                    filled_pdf_bytes = output_stream.getvalue()
+                    
+                    st.success("✅ PDF Material Order successfully generated!")
+                    st.download_button(
+                        label="📥 Download Editable Material Order",
+                        data=filled_pdf_bytes,
+                        file_name=f"Material_Order_{job_number}_{final_po}.pdf",
+                        mime="application/pdf"
+                    )
+                except Exception as e:
+                    st.error(f"Failed to generate PDF. Error: {e}")
+else: 
+    st.info("💡 Drop a takeoff report into the hub at the top of the page to populate the order manifests.")
