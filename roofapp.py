@@ -275,7 +275,8 @@ with left_panel:
                 f"{cap_nail_boxes}"
             ]
 
-    if material_type != "Mod Bit" and valleys > 0:
+    # Valley Flashing (W-Valley) only applies to Tile installations
+    if material_type == "Tile" and valleys > 0:
         descriptions.append("Valley Flashing (W-Valley)")
         quantities.append(f"{valley_pieces}")
 
@@ -380,3 +381,4 @@ if manifest_ready:
                     st.error(f"Failed to generate PDF. Error: {e}")
 else: 
     st.info("💡 Drop a takeoff report into the hub at the top of the page to populate the order manifests.")
+    
