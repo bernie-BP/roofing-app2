@@ -1,10 +1,13 @@
-import streamlit as st
-import streamlit.components.v1 as components
+import base64
+import json
 import math
 import os
 import re
-import base64
 from io import BytesIO
+
+import requests
+import streamlit as st
+import streamlit.components.v1 as components
 
 # Handle backend PDF graphic engines safely
 try:
@@ -47,8 +50,6 @@ def ask_ai_to_extract_contract_metadata(contract_text):
     if not GEMINI_KEY:
         return {"po": "", "tile_type": "", "birdstop": "Black", "drip_edge": "White"}
     
-    import requests
-    import json
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     headers = {"Content-Type": "application/json"}
     
@@ -74,8 +75,8 @@ def ask_ai_to_extract_contract_metadata(contract_text):
             res_json = response.json()
             text_response = res_json["candidates"][0]["content"]["parts"][0]["text"]
             return json.loads(text_response)
-    except Exception:
-        pass
+    except Exception as err:
+        st.warning(f"Metadata extraction fallback triggered: {err}")
     return {"po": "", "tile_type": "", "birdstop": "Black", "drip_edge": "White"}
 
 # --- 🧠 STATE MANAGEMENT INITIALIZATION ---
@@ -95,7 +96,7 @@ st.title("RealRoofing MO Production Dashboard")
 st.write("Upload your structural reports and signed customer contracts to automatically cross-reference data and generate material orders.")
 
 # ==========================================
-# 📋 UPLOADER HUB (NOW INCLUDES PDF TEMPLATE)
+# 📋 UPLOADER HUB
 # ==========================================
 st.header("📋 Automated Document Upload Hub")
 roofr_pages_bytes = None
@@ -232,17 +233,47 @@ with left_panel:
             descriptions = [f"Field Tile: {product}", f"Tile Underlayment ({underlayment_roll_size} SQ)", *hip_ridge_desc, "Roof Battens", "Birdstop Pieces", "Drip Edge"]
             quantities = [f"{pallets_needed:g}", f"{underlayment_rolls}", *hip_ridge_qty, f"{batten_bundles}", f"{birdstop_pieces}", f"{tile_drip_pieces}"]
         else:
+            # --- SHINGLE CALCULATIONS ---
             total_squares_with_waste = sq_count * WASTE_FACTOR
             shingle_drip_pieces = (math.ceil((eaves + rakes) / drip_edge_length) if (eaves + rakes) > 0 else 0) + 2
             field_bundles = math.ceil(total_squares_with_waste * 3)
             hip_ridge_bundles = math.ceil(hip_ridge_lf / 33) if hip_ridge_lf > 0 else 0
-            starter_bundles = math.ceil(eaves / 100) if eaves > 0 else 0
+            
+            # 1. GAF Pro Start: Eaves + Rakes @ 120 LF per bundle (No waste)
+            eaves_and_rakes_lf = eaves + rakes
+            pro_start_bundles = math.ceil(eaves_and_rakes_lf / 120) if eaves_and_rakes_lf > 0 else 0
+            
+            # 2. GAF WeatherWatch: Valleys + Eaves @ 3ft roll width (2 SQ / 200 sq ft per roll) (No waste)
+            valleys_and_eaves_lf = valleys + eaves
+            weather_watch_sqft = valleys_and_eaves_lf * 3  # 3ft width coverage
+            weather_watch_rolls = math.ceil(weather_watch_sqft / 200) if valleys_and_eaves_lf > 0 else 0
+            
             field_nail_boxes = math.ceil(sq_count / 20) if sq_count > 0 else 0
             eave_nail_boxes  = math.ceil(sq_count / 20) if sq_count > 0 else 0
             cap_nail_boxes   = math.ceil(sq_count / 20) if sq_count > 0 else 0
             
-            descriptions = [f"Field Shingles: {product}", f"Underlayment ({underlayment_roll_size} SQ)", "Hip & Ridge Cap", "Starter Strip", "Drip Edge Pieces", "Shingle Field Nails", "Eave Coil Nails", "Plastic Cap Nails"]
-            quantities = [f"{field_bundles}", f"{underlayment_rolls}", f"{hip_ridge_bundles}", f"{starter_bundles}", f"{shingle_drip_pieces}", f"{field_nail_boxes}", f"{eave_nail_boxes}", f"{cap_nail_boxes}"]
+            descriptions = [
+                f"Field Shingles: {product}", 
+                f"Underlayment ({underlayment_roll_size} SQ)", 
+                "GAF WeatherWatch Leak Barrier (2 SQ Roll)",
+                "GAF Pro Start Starter Strip", 
+                "Hip & Ridge Cap", 
+                "Drip Edge Pieces", 
+                "Shingle Field Nails", 
+                "Eave Coil Nails", 
+                "Plastic Cap Nails"
+            ]
+            quantities = [
+                f"{field_bundles}", 
+                f"{underlayment_rolls}", 
+                f"{weather_watch_rolls}",
+                f"{pro_start_bundles}", 
+                f"{hip_ridge_bundles}", 
+                f"{shingle_drip_pieces}", 
+                f"{field_nail_boxes}", 
+                f"{eave_nail_boxes}", 
+                f"{cap_nail_boxes}"
+            ]
 
     if material_type != "Mod Bit" and valleys > 0:
         descriptions.append("Valley Flashing (W-Valley)")
@@ -279,7 +310,7 @@ with right_panel:
                 html_rendered = cached_pdf_to_html_viewport(target_bytes, label_tag)
                 components.html(html_rendered, height=770, scrolling=False)
         except Exception as err: st.caption("Rendering visual reference layout frame...")
-    else: st.info(f"💡 Drop your PDF files into the uploader matrix above to unlock the scrollable window for this document.")
+    else: st.info("💡 Drop your PDF files into the uploader matrix above to unlock the scrollable window for this document.")
 
 # 📋 BOTTOM ROW: DRAFT ORDER TABLE ENGINE & PDF GENERATOR
 st.markdown("---")
@@ -292,18 +323,17 @@ if manifest_ready:
     st.header("3. Generate Editable PDF Order")
     job_number = st.text_input("Job # (For PDF Generation)", placeholder="e.g., RR-1997")
     
-    # 🛠️ TEMPORARY DEVELOPER TOOL: Find the hidden PDF field names
+    # 🛠️ DEVELOPER TOOL: Find the hidden PDF field names
     if template_pages_bytes:
         with st.expander("🛠️ Developer Tool: Map PDF Field Names"):
-            st.write("These are the hidden box names inside your uploaded PDF. We will use these to map the exact calculations to the right rows.")
+            st.write("These are the hidden box names inside your uploaded PDF. Use these exact keys to map values below.")
             try:
                 reader = pypdf.PdfReader(BytesIO(template_pages_bytes))
                 fields = reader.get_fields()
                 if fields:
-                    field_names = list(fields.keys())
-                    st.json(field_names)
+                    st.json(list(fields.keys()))
                 else:
-                    st.warning("No fillable AcroForm text boxes were found in this PDF. It might be a flat, scanned document.")
+                    st.warning("No fillable AcroForm text boxes were found in this PDF.")
             except Exception as e:
                 st.error(f"Could not read PDF fields: {e}")
 
@@ -316,11 +346,8 @@ if manifest_ready:
                 try:
                     reader = pypdf.PdfReader(BytesIO(template_pages_bytes))
                     writer = pypdf.PdfWriter()
-                    writer.append_pages_from_reader(reader)
+                    writer.append(reader)
                     
-                    # 📝 THIS IS WHERE WE MAP OUR DATA TO THE PDF BOXES
-                    # Note: These keys (e.g., 'Job_Number_Field') are placeholders. 
-                    # Once you see the real field names in the Developer Tool above, we will update these!
                     form_data_mapping = {
                         "Job_Number_Field": job_number,
                         "PO_Field": final_po,
@@ -328,12 +355,13 @@ if manifest_ready:
                         "Birdstop_Color": final_birdstop,
                         "Tile_Manufacturer_Field": "Eagle" if "Eagle" in final_tile else "Westlake",
                         "Tile_Profile_Field": final_tile,
-                        # Example of mapping line items:
-                        # "Row1_Item_Field": descriptions[0],
-                        # "Row1_Qty_Field": quantities[0],
                     }
                     
-                    # Inject data into the PDF while keeping it editable
+                    # Dynamically inject row items into the PDF form data mapping
+                    for idx, (desc, qty) in enumerate(zip(descriptions, quantities), start=1):
+                        form_data_mapping[f"Item_{idx}_Desc"] = desc
+                        form_data_mapping[f"Item_{idx}_Qty"] = qty
+
                     for page in writer.pages:
                         writer.update_page_form_field_values(page, form_data_mapping)
                     
