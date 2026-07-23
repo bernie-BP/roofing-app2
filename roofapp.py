@@ -46,38 +46,51 @@ def cached_pdf_to_html_viewport(target_bytes, label_tag):
     html_content += '</div>'
     return html_content
 
-def ask_ai_to_extract_contract_metadata(contract_text):
+# 🔥 UPGRADED: Now sends the actual PDF file bytes directly to Gemini Vision!
+def ask_ai_to_extract_contract_metadata(contract_bytes):
     if not GEMINI_KEY:
         st.error("⚠️ GEMINI_API_KEY is missing from Streamlit secrets.")
-        return {"po": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field"}
-    
-    # If pypdf couldn't read any text, don't bother asking the AI
-    if not contract_text or len(contract_text.strip()) < 20:
-        st.warning("⚠️ No readable text found in the PDF. It might be a scanned image.")
         return {"po": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field"}
     
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     headers = {"Content-Type": "application/json"}
     
-    prompt = f"""
-    You are a professional roofing production assistant. Analyze the following text extracted from a signed homeowner contract and extract the construction selections accurately. Pay special attention to the section titled "My product Color selections" or similar wording.
+    # Convert PDF bytes to base64 so Gemini can read the document visually
+    pdf_b64 = base64.b64encode(contract_bytes).decode("utf-8")
     
-    1. Customer Name or Job Reference Name (To be used as the PO Number)
-    2. Specific Tile Profile, Brand, or Shingle Style chosen (e.g., Eagle Flat, Westlake S-Profile, GAF HDZ)
-    3. Birdstop Color specified. (Look specifically in the product color selections section). If there is nothing specified, return exactly "Blank Field".
-    4. Drip Edge Color selected by the customer. (Look specifically in the product color selections section). If there is nothing specified, return exactly "Blank Field".
+    prompt = """
+    You are a professional roofing production assistant. Analyze this signed homeowner contract document and extract the construction selections accurately. 
+    Review every page of the document. Look for checked boxes, typed text, or handwritten notes.
+    
+    1. Customer Name or Job Reference Name (To be used as the PO Number).
+    2. Specific Tile Profile, Brand, or Shingle Style chosen (e.g., Eagle Flat, Westlake S-Profile, GAF HDZ).
+    3. Birdstop Color specified. Look for the section titled "My product Color selections" or similar. If none is specified, return exactly "Blank Field".
+    4. Drip Edge Color selected. Look for the section titled "My product Color selections" or similar. If none is specified, return exactly "Blank Field".
 
     Return ONLY a valid JSON object with the exact keys: "po", "tile_type", "birdstop", "drip_edge". 
     Do not include any markdown wrappers like backticks or regular prose.
-    
-    Contract Text Document Content:
-    {contract_text[:6000]}
     """
     
-    payload = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"responseMimeType": "application/json"}}
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": prompt},
+                    {
+                        "inlineData": {
+                            "mimeType": "application/pdf",
+                            "data": pdf_b64
+                        }
+                    }
+                ]
+            }
+        ],
+        "generationConfig": {"responseMimeType": "application/json"}
+    }
     
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=15)
+        # Increased timeout to 30s since analyzing a full PDF takes a bit longer
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
         if response.status_code == 200:
             res_json = response.json()
             text_response = res_json["candidates"][0]["content"]["parts"][0]["text"]
@@ -97,8 +110,6 @@ if "processed_roofr_hash" not in st.session_state:
     st.session_state.processed_roofr_hash = None
 if "processed_contract_hash" not in st.session_state:
     st.session_state.processed_contract_hash = None
-if "contract_raw_text" not in st.session_state:
-    st.session_state.contract_raw_text = ""
 
 if os.path.exists("logo.png"):
     st.image("logo.png", width=200)
@@ -158,24 +169,11 @@ else:
         contract_pages_bytes = uploaded_contract.getvalue()
         current_contract_hash = f"{uploaded_contract.name}_{len(contract_pages_bytes)}"
         if st.session_state.processed_contract_hash != current_contract_hash:
-            try:
-                contract_reader = pypdf.PdfReader(BytesIO(contract_pages_bytes))
-                contract_text = "".join([page.extract_text() for page in contract_reader.pages if page.extract_text()])
-                
-                # Save raw text to session state for debugging
-                st.session_state.contract_raw_text = contract_text 
-
-                with st.spinner("AI is analyzing signed contract..."):
-                    st.session_state.ai_metadata = ask_ai_to_extract_contract_metadata(contract_text)
-                    st.session_state.processed_contract_hash = current_contract_hash
-                    st.success("✅ Signed contract processed!")
-            except Exception as e: st.error(f"Error reading contract: {e}")
-
-    # 🛠️ DIAGNOSTIC TOOL: See what the AI sees
-    if st.session_state.contract_raw_text:
-        with st.expander("🛠️ Developer Tool: View Extracted Contract Text"):
-            st.info("This is the exact text the PDF reader was able to pull. If the info you want is missing here, the AI cannot see it.")
-            st.text(st.session_state.contract_raw_text if len(st.session_state.contract_raw_text.strip()) > 0 else "NO TEXT DETECTED - THIS IS LIKELY A SCANNED IMAGE.")
+            with st.spinner("AI is analyzing the entire signed contract visually..."):
+                # 🔥 We now pass the RAW PDF BYTES to Gemini!
+                st.session_state.ai_metadata = ask_ai_to_extract_contract_metadata(contract_pages_bytes)
+                st.session_state.processed_contract_hash = current_contract_hash
+                st.success("✅ Signed contract processed!")
 
 st.markdown("---")
 
@@ -335,4 +333,3 @@ if manifest_ready:
     st.table({"Material Item Description": descriptions, "Calculated Quantity": quantities})
 else: 
     st.info("💡 Drop a takeoff report into the hub at the top of the page to populate the order manifests.")
-    
