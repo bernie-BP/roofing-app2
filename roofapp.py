@@ -56,16 +56,17 @@ def ask_ai_to_extract_contract_metadata(contract_bytes):
     
     pdf_b64 = base64.b64encode(contract_bytes).decode("utf-8")
     
+    # 🔥 Highly aggressive prompt specifically targeting wood layouts and abbreviations
     prompt = """
     You are a professional roofing production assistant. Analyze this signed homeowner contract document and extract the construction selections accurately. 
-    Review every page of the document. Look for checked boxes, typed text, or handwritten notes.
+    Review every page of the document carefully. Look for checked boxes, typed text, handwritten notes, and line-item tables.
     
     1. Customer Name or Job Reference Name (To be used as the PO Number).
     2. Specific Tile Profile, Brand, or Shingle Style chosen (e.g., Eagle Flat, Westlake S-Profile, GAF HDZ).
     3. Birdstop Color specified. Look for the section titled "My product Color selections" or similar. If none is specified, return exactly "Blank Field".
     4. Drip Edge Color selected. Look for the section titled "My product Color selections" or similar. If none is specified, return exactly "Blank Field".
-    5. Wood Replacements: Search the contract for any mention of wood replacement, wood repairs, fascia board replacement, plywood decking repairs, etc. List every wood-related item as an array of strings. If none, return an empty array [].
-    6. Additional items: Any other special instructions, non-wood repairs, or non-wood items mentioned (e.g., dead valley tie-ins, skylight replacements). List these as an array of strings. If none, return an empty array [].
+    5. Wood Replacements: Scan the ENTIRE contract specifically for WOOD repairs, replacements, or carpentry. Look for terms like "Fascia", "Plywood", "OSB", "CDX", "Decking", "1x2", "2x4", "Barge board", "linear feet", "LF", or "sheets". Look inside pricing tables, scope of work sections, and handwritten notes. Extract every wood-related line item, including quantities if listed (e.g., "Replace 40 LF of 1x6 fascia", "3 sheets of OSB included"). Return as an array of strings. If absolutely none are found, return an empty array [].
+    6. Additional items: Any other special instructions, non-wood repairs, or non-wood items mentioned (e.g., dead valley tie-ins, skylight replacements, stucco repair). List these as an array of strings. If none, return an empty array [].
 
     Return ONLY a valid JSON object with the exact keys: "po", "tile_type", "birdstop", "drip_edge", "wood_replacements", "additional_items". 
     Do not include any markdown wrappers like backticks or regular prose.
