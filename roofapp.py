@@ -165,8 +165,13 @@ left_panel, right_panel = st.columns([1.0, 1.0], gap="large")
 
 with left_panel:
     st.subheader("🛠️ Production Controls & Layout Settings")
+    
+    # MOVED: Top level layout selections using radio buttons
     material_type = st.radio("Material Type", options=["Tile", "Shingles", "Mod Bit"], horizontal=True)
     job_type = st.radio("Job Type", options=["New Tile", "Re-Roof"], index=1, horizontal=True) if material_type == "Tile" else None
+    
+    if material_type != "Mod Bit":
+        underlayment_roll_size = st.radio("Underlayment Roll Size", options=[2, 5, 10], format_func=lambda x: f"{x} SQ roll", horizontal=True)
     
     st.markdown("### 📏 Dimensions")
     if material_type == "Mod Bit":
@@ -203,7 +208,6 @@ with left_panel:
             rakes = get_num(st.text_input("Rakes (Linear Feet)", value=st.session_state.scanned_vals["rakes"]))
             waste_pct = get_num(st.text_input("Waste Factor (%)", value="10"))
 
-        underlayment_roll_size = st.selectbox("Underlayment Roll Size", options=[2, 5, 10], format_func=lambda x: f"{x} SQ roll")
         drip_edge_length = 10
         WASTE_FACTOR = 1 + (waste_pct / 100)
         hip_ridge_lf = hips + ridges
