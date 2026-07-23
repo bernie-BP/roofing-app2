@@ -50,7 +50,7 @@ def cached_pdf_to_html_viewport(target_bytes, label_tag):
 def ask_ai_to_extract_contract_metadata(contract_bytes):
     if not GEMINI_KEY:
         st.error("⚠️ GEMINI_API_KEY is missing from Streamlit secrets.")
-        return {"po": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field"}
+        return {"po": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field", "additional_items": []}
     
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     headers = {"Content-Type": "application/json"}
@@ -66,8 +66,9 @@ def ask_ai_to_extract_contract_metadata(contract_bytes):
     2. Specific Tile Profile, Brand, or Shingle Style chosen (e.g., Eagle Flat, Westlake S-Profile, GAF HDZ).
     3. Birdstop Color specified. Look for the section titled "My product Color selections" or similar. If none is specified, return exactly "Blank Field".
     4. Drip Edge Color selected. Look for the section titled "My product Color selections" or similar. If none is specified, return exactly "Blank Field".
+    5. Additional items, repairs, or special instructions mentioned in the contract (e.g., Wood replacements, dead valley tie-ins, fascia repairs, skylight replacements). List these as an array of strings. If none, return an empty array [].
 
-    Return ONLY a valid JSON object with the exact keys: "po", "tile_type", "birdstop", "drip_edge". 
+    Return ONLY a valid JSON object with the exact keys: "po", "tile_type", "birdstop", "drip_edge", "additional_items". 
     Do not include any markdown wrappers like backticks or regular prose.
     """
     
@@ -99,13 +100,13 @@ def ask_ai_to_extract_contract_metadata(contract_bytes):
             st.error(f"API Error {response.status_code}: {response.text}")
     except Exception as err:
         st.error(f"Metadata extraction AI request failed: {err}")
-    return {"po": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field"}
+    return {"po": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field", "additional_items": []}
 
 # --- 🧠 STATE MANAGEMENT INITIALIZATION ---
 if "scanned_vals" not in st.session_state:
     st.session_state.scanned_vals = {"pitched_sq": "0.0", "flat_sq": "0.0", "eaves": "0.0", "valleys": "0.0", "hips": "0.0", "ridges": "0.0", "rakes": "0.0"}
 if "ai_metadata" not in st.session_state:
-    st.session_state.ai_metadata = {"po": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field"}
+    st.session_state.ai_metadata = {"po": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field", "additional_items": []}
 if "processed_roofr_hash" not in st.session_state:
     st.session_state.processed_roofr_hash = None
 if "processed_contract_hash" not in st.session_state:
@@ -306,6 +307,14 @@ with left_panel:
     with col_m2:
         final_birdstop = st.text_input("Birdstop Color Spec", value=ai_vals.get("birdstop", "Blank Field"))
         final_drip = st.text_input("Drip Edge Color Spec", value=ai_vals.get("drip_edge", "Blank Field"))
+        
+    st.markdown("#### 🪵 Additional Contract Items")
+    additional_items = ai_vals.get("additional_items", [])
+    if additional_items and isinstance(additional_items, list):
+        for item in additional_items:
+            st.markdown(f"- {item}")
+    else:
+        st.info("No additional items or wood replacement notes found in the contract.")
 
 # 🖼️ RIGHT PANEL: SCROLLABLE GRAPHICS VIEWPORT
 with right_panel:
