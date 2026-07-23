@@ -101,18 +101,15 @@ st.write("Upload your structural reports and signed customer contracts to automa
 st.header("📋 Automated Document Upload Hub")
 roofr_pages_bytes = None
 contract_pages_bytes = None
-template_pages_bytes = None
 
 if not PDF_ENGINES_AVAILABLE:
     st.info("💡 *PDF Processing Modules are active when deployed live with pypdf and pdf2image requirements.*")
 else:
-    up_col1, up_col2, up_col3 = st.columns(3)
+    up_col1, up_col2 = st.columns(2)
     with up_col1:
         uploaded_roofr = st.file_uploader("1. Roofr Measurement (PDF)", type=["pdf"])
     with up_col2:
         uploaded_contract = st.file_uploader("2. Signed Contract (PDF)", type=["pdf"])
-    with up_col3:
-        uploaded_template = st.file_uploader("3. Blank MO Template (PDF)", type=["pdf"], help="Upload your blank supplier PDF form here.")
     
     if uploaded_roofr is not None:
         roofr_pages_bytes = uploaded_roofr.getvalue()
@@ -158,10 +155,6 @@ else:
                     st.session_state.processed_contract_hash = current_contract_hash
                     st.success("✅ Signed contract processed!")
             except Exception as e: st.error(f"Error reading contract: {e}")
-            
-    if uploaded_template is not None:
-        template_pages_bytes = uploaded_template.getvalue()
-        st.success("✅ Blank MO Template loaded!")
 
 st.markdown("---")
 
@@ -295,15 +288,11 @@ with left_panel:
 # 🖼️ RIGHT PANEL: SCROLLABLE GRAPHICS VIEWPORT
 with right_panel:
     st.subheader("🖼️ Document Reference Panel")
-    view_toggle = st.radio("Display View Mode", options=["1. Roofr Measurement Blueprint", "2. Signed Homeowner Contract", "3. Blank Template Preview"], horizontal=True)
+    view_toggle = st.radio("Display View Mode", options=["1. Roofr Measurement Blueprint", "2. Signed Homeowner Contract"], horizontal=True)
     st.markdown("---")
     
-    if "Template" in view_toggle:
-        target_bytes = template_pages_bytes
-        label_tag = "Blank MO Template"
-    else:
-        target_bytes = roofr_pages_bytes if "Roofr" in view_toggle else contract_pages_bytes
-        label_tag = "Roofr Takeoff Blueprint" if "Roofr" in view_toggle else "Signed Homeowner Contract"
+    target_bytes = roofr_pages_bytes if "Roofr" in view_toggle else contract_pages_bytes
+    label_tag = "Roofr Takeoff Blueprint" if "Roofr" in view_toggle else "Signed Homeowner Contract"
     
     if target_bytes is not None:
         try:
@@ -313,72 +302,12 @@ with right_panel:
         except Exception as err: st.caption("Rendering visual reference layout frame...")
     else: st.info("💡 Drop your PDF files into the uploader matrix above to unlock the scrollable window for this document.")
 
-# 📋 BOTTOM ROW: DRAFT ORDER TABLE ENGINE & PDF GENERATOR
+# 📋 BOTTOM ROW: DRAFT ORDER TABLE ENGINE
 st.markdown("---")
 st.header("2. Calculated Material Order Manifest")
 manifest_ready = (material_type == "Mod Bit" and (mod_sq > 0 or (mod_eaves + mod_rakes) > 0)) or (material_type != "Mod Bit" and sq_count > 0)
 
 if manifest_ready:
     st.table({"Material Item Description": descriptions, "Calculated Quantity": quantities})
-    
-    st.header("3. Generate Editable PDF Order")
-    job_number = st.text_input("Job # (For PDF Generation)", placeholder="e.g., RR-1997")
-    
-    # 🛠️ DEVELOPER TOOL: Find the hidden PDF field names
-    if template_pages_bytes:
-        with st.expander("🛠️ Developer Tool: Map PDF Field Names"):
-            st.write("These are the hidden box names inside your uploaded PDF. Use these exact keys to map values below.")
-            try:
-                reader = pypdf.PdfReader(BytesIO(template_pages_bytes))
-                fields = reader.get_fields()
-                if fields:
-                    st.json(list(fields.keys()))
-                else:
-                    st.warning("No fillable AcroForm text boxes were found in this PDF.")
-            except Exception as e:
-                st.error(f"Could not read PDF fields: {e}")
-
-    # 🚀 PDF GENERATION ENGINE
-    if st.button("Generate & Download Filled PDF"):
-        if not template_pages_bytes:
-            st.error("⚠️ Please upload your Blank MO Template in the uploader hub at the top of the page first.")
-        else:
-            with st.spinner("Generating editable PDF..."):
-                try:
-                    reader = pypdf.PdfReader(BytesIO(template_pages_bytes))
-                    writer = pypdf.PdfWriter()
-                    writer.append(reader)
-                    
-                    form_data_mapping = {
-                        "Job_Number_Field": job_number,
-                        "PO_Field": final_po,
-                        "Drip_Edge_Color": final_drip,
-                        "Birdstop_Color": final_birdstop,
-                        "Tile_Manufacturer_Field": "Eagle" if "Eagle" in final_tile else "Westlake",
-                        "Tile_Profile_Field": final_tile,
-                    }
-                    
-                    # Dynamically inject row items into the PDF form data mapping
-                    for idx, (desc, qty) in enumerate(zip(descriptions, quantities), start=1):
-                        form_data_mapping[f"Item_{idx}_Desc"] = desc
-                        form_data_mapping[f"Item_{idx}_Qty"] = qty
-
-                    for page in writer.pages:
-                        writer.update_page_form_field_values(page, form_data_mapping)
-                    
-                    output_stream = BytesIO()
-                    writer.write(output_stream)
-                    filled_pdf_bytes = output_stream.getvalue()
-                    
-                    st.success("✅ PDF Material Order successfully generated!")
-                    st.download_button(
-                        label="📥 Download Editable Material Order",
-                        data=filled_pdf_bytes,
-                        file_name=f"Material_Order_{job_number}_{final_po}.pdf",
-                        mime="application/pdf"
-                    )
-                except Exception as e:
-                    st.error(f"Failed to generate PDF. Error: {e}")
 else: 
     st.info("💡 Drop a takeoff report into the hub at the top of the page to populate the order manifests.")
-    
