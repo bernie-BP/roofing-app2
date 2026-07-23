@@ -193,31 +193,39 @@ with left_panel:
     
     st.markdown("### 📏 Dimensions")
     if material_type == "Mod Bit":
-        mod_sq = get_num(st.text_input("Square Count (SQ)", value=st.session_state.scanned_vals["flat_sq"]))
-        mod_eaves = get_num(st.text_input("Eaves (Linear Feet)", value=st.session_state.scanned_vals["eaves"]))
-        mod_rakes = get_num(st.text_input("Rakes (Linear Feet)", value=st.session_state.scanned_vals["rakes"]))
+        sub_col1, sub_col2 = st.columns(2)
+        with sub_col1:
+            mod_sq = get_num(st.text_input("Square Count (SQ)", value=st.session_state.scanned_vals["flat_sq"]))
+            mod_eaves = get_num(st.text_input("Eaves (Linear Feet)", value=st.session_state.scanned_vals["eaves"]))
+        with sub_col2:
+            mod_rakes = get_num(st.text_input("Rakes (Linear Feet)", value=st.session_state.scanned_vals["rakes"]))
+            waste_pct = get_num(st.text_input("Waste Factor (%)", value="10", key="mb_waste"))
+            
         CAPSHEET_COLORS = ["Buff", "Grey Slate", "Black", "White", "Weatherwood"]
         cap_color = st.selectbox("Cap Sheet Color", CAPSHEET_COLORS)
         mod_bit_base_type = st.selectbox("Select Base Layer Material Type", options=["Base Sheet (2 SQ per roll)", "SAV 9\" Self-Adhered (66 LF per roll)"])
         
+        WASTE_FACTOR = 1 + (waste_pct / 100)
+        wf_str = f"{WASTE_FACTOR:g}"
         drip_edge_length = 10
-        mb_drip_pieces = (math.ceil(mod_eaves / drip_edge_length) if mod_eaves > 0 else 0) + 2
-        cap_rolls = math.ceil(mod_sq) if mod_sq > 0 else 0
+        
+        mb_drip_pieces = math.ceil((mod_eaves * WASTE_FACTOR) / drip_edge_length) + 2 if mod_eaves > 0 else 0
+        cap_rolls = math.ceil(mod_sq * WASTE_FACTOR) if mod_sq > 0 else 0
         
         if mod_bit_base_type == "Base Sheet (2 SQ per roll)":
-            base_rolls = math.ceil(mod_sq / 2) if mod_sq > 0 else 0
+            base_rolls = math.ceil((mod_sq * WASTE_FACTOR) / 2) if mod_sq > 0 else 0
             base_description = "Polyglass Base Sheet"
             base_coverage = "2 SQ (200 sq ft) roll"
-            base_formula = "RoundUp(SQ / 2)"
+            base_formula = f"RoundUp((SQ * {wf_str}) / 2)"
         else:
-            base_rolls = math.ceil((mod_eaves + mod_rakes) / 66) if (mod_eaves + mod_rakes) > 0 else 0
+            base_rolls = math.ceil(((mod_eaves + mod_rakes) * WASTE_FACTOR) / 66) if (mod_eaves + mod_rakes) > 0 else 0
             base_description = 'Polyglass SAV 9" Self-Adhered'
             base_coverage = "66ft roll"
-            base_formula = "RoundUp((Eaves + Rakes) / 66)"
+            base_formula = f"RoundUp(((Eaves + Rakes) * {wf_str}) / 66)"
             
         descriptions = [f"Polyglass Cap Sheet — {cap_color}", base_description, "Drip Edge"]
         coverages = ["1 SQ roll", base_coverage, "10ft pieces"]
-        formulas = ["RoundUp(SQ)", base_formula, "RoundUp(Eaves / 10) + 2"]
+        formulas = [f"RoundUp(SQ * {wf_str})", base_formula, f"RoundUp((Eaves * {wf_str}) / 10) + 2"]
         quantities = [f"{cap_rolls}", f"{base_rolls}", f"{mb_drip_pieces}"]
         
     else:
@@ -235,52 +243,54 @@ with left_panel:
 
         drip_edge_length = 10
         WASTE_FACTOR = 1 + (waste_pct / 100)
+        wf_str = f"{WASTE_FACTOR:g}"
         hip_ridge_lf = hips + ridges
-        underlayment_rolls = math.ceil((sq_count * 1.15) / underlayment_roll_size)
-        valley_pieces = math.ceil(valleys / 10) if valleys > 0 else 0
+        
+        # Globally applying waste
+        underlayment_rolls = math.ceil((sq_count * WASTE_FACTOR) / underlayment_roll_size)
+        valley_pieces = math.ceil((valleys * WASTE_FACTOR) / 10) if valleys > 0 else 0
         
         if material_type == "Tile":
             total_squares_with_waste = sq_count * WASTE_FACTOR
             pallets_needed = (0.5 if sq_count < 20 else math.ceil((sq_count / 20) * 2) / 2) if job_type == "Re-Roof" else math.ceil(total_squares_with_waste / 2.97)
                 
-            tile_drip_pieces = (math.ceil(eaves / drip_edge_length) if eaves > 0 else 0) + 2
-            birdstop_pieces = (math.ceil(eaves / 10) if eaves > 0 else 0) + 2
+            tile_drip_pieces = (math.ceil((eaves * WASTE_FACTOR) / drip_edge_length) if eaves > 0 else 0) + 2
+            birdstop_pieces = (math.ceil((eaves * WASTE_FACTOR) / 10) if eaves > 0 else 0) + 2
             is_flat_tile = "Flat" in product
-            batten_bundles = math.ceil(sq_count)
-            hip_bundles = 0 if is_flat_tile else math.ceil(hips / 25)
-            ridge_bundles = math.ceil(hip_ridge_lf / 100) if is_flat_tile else math.ceil(ridges / 50)
+            batten_bundles = math.ceil(sq_count * WASTE_FACTOR)
+            
+            hip_bundles = 0 if is_flat_tile else math.ceil((hips * WASTE_FACTOR) / 25)
+            ridge_bundles = math.ceil((hip_ridge_lf * WASTE_FACTOR) / 100) if is_flat_tile else math.ceil((ridges * WASTE_FACTOR) / 50)
             
             hip_ridge_desc = ["Hip Closures", "Ridge Closures"] if not is_flat_tile else ["Hip & Ridge Closures"]
             hip_ridge_cov = ["25ft per bundle", "50ft per bundle"] if not is_flat_tile else ["100ft per bundle"]
             hip_ridge_qty = [f"{hip_bundles}", f"{ridge_bundles}"] if not is_flat_tile else [f"{ridge_bundles}"]
             
-            pallet_formula = f"RoundUp((SQ * {WASTE_FACTOR}) / 2.97)" if job_type == "New Tile" else "RoundUp(SQ / 20) to half pallets"
-            hip_ridge_form = ["RoundUp(Hips / 25)", "RoundUp(Ridges / 50)"] if not is_flat_tile else ["RoundUp((Hips + Ridges) / 100)"]
+            pallet_formula = f"RoundUp((SQ * {wf_str}) / 2.97)" if job_type == "New Tile" else "RoundUp(SQ / 20) to half pallets"
+            hip_ridge_form = [f"RoundUp((Hips * {wf_str}) / 25)", f"RoundUp((Ridges * {wf_str}) / 50)"] if not is_flat_tile else [f"RoundUp(((Hips + Ridges) * {wf_str}) / 100)"]
             
             descriptions = [f"Field Tile: {product}", "Tile Underlayment", *hip_ridge_desc, "Roof Battens", "Birdstop Pieces", "Drip Edge"]
             coverages = [f"~2.97 SQ per pallet" if job_type == "New Tile" else "Varies by SQ", f"{underlayment_roll_size} SQ roll", *hip_ridge_cov, "1 SQ per bundle", "10ft pieces", "10ft pieces"]
-            formulas = [pallet_formula, f"RoundUp((SQ * 1.15) / {underlayment_roll_size})", *hip_ridge_form, "RoundUp(SQ)", "RoundUp(Eaves / 10) + 2", "RoundUp(Eaves / 10) + 2"]
+            formulas = [pallet_formula, f"RoundUp((SQ * {wf_str}) / {underlayment_roll_size})", *hip_ridge_form, f"RoundUp(SQ * {wf_str})", f"RoundUp((Eaves * {wf_str}) / 10) + 2", f"RoundUp((Eaves * {wf_str}) / 10) + 2"]
             quantities = [f"{pallets_needed:g}", f"{underlayment_rolls}", *hip_ridge_qty, f"{batten_bundles}", f"{birdstop_pieces}", f"{tile_drip_pieces}"]
             
         else:
-            # --- SHINGLE CALCULATIONS ---
+            # --- SHINGLE CALCULATIONS (Waste universally applied) ---
             total_squares_with_waste = sq_count * WASTE_FACTOR
-            shingle_drip_pieces = (math.ceil((eaves + rakes) / drip_edge_length) if (eaves + rakes) > 0 else 0) + 2
+            shingle_drip_pieces = (math.ceil(((eaves + rakes) * WASTE_FACTOR) / drip_edge_length) if (eaves + rakes) > 0 else 0) + 2
             field_bundles = math.ceil(total_squares_with_waste * 3)
-            hip_ridge_bundles = math.ceil(hip_ridge_lf / 33) if hip_ridge_lf > 0 else 0
+            hip_ridge_bundles = math.ceil((hip_ridge_lf * WASTE_FACTOR) / 33) if hip_ridge_lf > 0 else 0
             
-            # 1. GAF Pro Start
-            eaves_and_rakes_lf = eaves + rakes
+            eaves_and_rakes_lf = (eaves + rakes) * WASTE_FACTOR
             pro_start_bundles = math.ceil(eaves_and_rakes_lf / 120) if eaves_and_rakes_lf > 0 else 0
             
-            # 2. GAF WeatherWatch
-            valleys_and_eaves_lf = valleys + eaves
+            valleys_and_eaves_lf = (valleys + eaves) * WASTE_FACTOR
             weather_watch_sqft = valleys_and_eaves_lf * 3 
             weather_watch_rolls = math.ceil(weather_watch_sqft / 200) if valleys_and_eaves_lf > 0 else 0
             
-            field_nail_boxes = math.ceil(sq_count / 20) if sq_count > 0 else 0
-            eave_nail_boxes  = math.ceil(sq_count / 20) if sq_count > 0 else 0
-            cap_nail_boxes   = math.ceil(sq_count / 20) if sq_count > 0 else 0
+            field_nail_boxes = math.ceil((sq_count * WASTE_FACTOR) / 20) if sq_count > 0 else 0
+            eave_nail_boxes  = math.ceil((sq_count * WASTE_FACTOR) / 20) if sq_count > 0 else 0
+            cap_nail_boxes   = math.ceil((sq_count * WASTE_FACTOR) / 20) if sq_count > 0 else 0
             
             descriptions = [
                 f"Field Shingles: {product}", 
@@ -305,15 +315,15 @@ with left_panel:
                 "~20 SQ per box"
             ]
             formulas = [
-                f"RoundUp((SQ * {WASTE_FACTOR}) * 3)",
-                f"RoundUp((SQ * 1.15) / {underlayment_roll_size})",
-                "RoundUp(((Valleys + Eaves) * 3) / 200)",
-                "RoundUp((Eaves + Rakes) / 120)",
-                "RoundUp((Hips + Ridges) / 33)",
-                "RoundUp((Eaves + Rakes) / 10) + 2",
-                "RoundUp(SQ / 20)",
-                "RoundUp(SQ / 20)",
-                "RoundUp(SQ / 20)"
+                f"RoundUp((SQ * {wf_str}) * 3)",
+                f"RoundUp((SQ * {wf_str}) / {underlayment_roll_size})",
+                f"RoundUp((((Valleys + Eaves) * {wf_str}) * 3) / 200)",
+                f"RoundUp(((Eaves + Rakes) * {wf_str}) / 120)",
+                f"RoundUp(((Hips + Ridges) * {wf_str}) / 33)",
+                f"RoundUp(((Eaves + Rakes) * {wf_str}) / 10) + 2",
+                f"RoundUp((SQ * {wf_str}) / 20)",
+                f"RoundUp((SQ * {wf_str}) / 20)",
+                f"RoundUp((SQ * {wf_str}) / 20)"
             ]
             quantities = [
                 f"{field_bundles}", 
@@ -331,7 +341,7 @@ with left_panel:
     if material_type == "Tile" and valleys > 0:
         descriptions.append("Valley Flashing (W-Valley)")
         coverages.append("10ft pieces")
-        formulas.append("RoundUp(Valleys / 10)")
+        formulas.append(f"RoundUp((Valleys * {wf_str}) / 10)")
         quantities.append(f"{valley_pieces}")
 
     st.markdown("---")
@@ -395,4 +405,3 @@ if manifest_ready:
     })
 else: 
     st.info("💡 Drop a takeoff report into the hub at the top of the page to populate the order manifests.")
-        
