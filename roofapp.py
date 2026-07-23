@@ -56,7 +56,7 @@ def ask_ai_to_extract_contract_metadata(contract_bytes):
     
     pdf_b64 = base64.b64encode(contract_bytes).decode("utf-8")
     
-    # 🔥 Added Customer Name and Job Address to the prompt
+    # 🔥 Highly aggressive prompt specifically targeting wood layouts and abbreviations
     prompt = """
     You are a professional roofing production assistant. Analyze this signed homeowner contract document and extract the construction selections accurately. 
     Review every page of the document carefully. Look for checked boxes, typed text, handwritten notes, and line-item tables.
@@ -67,8 +67,8 @@ def ask_ai_to_extract_contract_metadata(contract_bytes):
     4. Specific Tile Profile, Brand, or Shingle Style chosen (e.g., Eagle Flat, Westlake S-Profile, GAF HDZ).
     5. Birdstop Color specified. Look for the section titled "My product Color selections" or similar. If none is specified, return exactly "Blank Field".
     6. Drip Edge Color selected. Look for the section titled "My product Color selections" or similar. If none is specified, return exactly "Blank Field".
-    7. Wood Replacements: Scan the ENTIRE contract specifically for WOOD repairs, replacements, or carpentry. Look for terms like "Fascia", "Plywood", "OSB", "CDX", "Decking", "1x2", "2x4", "Barge board", "linear feet", "LF", or "sheets". Extract every wood-related line item. Return as an array of strings. If none, return [].
-    8. Additional items: Any other special instructions, non-wood repairs, or non-wood items mentioned. List these as an array of strings. If none, return [].
+    7. Wood Replacements: Scan the ENTIRE contract specifically for WOOD repairs, replacements, or carpentry. Look for terms like "Fascia", "Plywood", "OSB", "CDX", "Decking", "1x2", "2x4", "Barge board", "linear feet", "LF", or "sheets". Look inside pricing tables, scope of work sections, and handwritten notes. Extract every wood-related line item, including quantities if listed (e.g., "Replace 40 LF of 1x6 fascia", "3 sheets of OSB included"). Return as an array of strings. If absolutely none are found, return an empty array [].
+    8. Additional items: Any other special instructions, non-wood repairs, or non-wood items mentioned (e.g., dead valley tie-ins, skylight replacements, stucco repair). List these as an array of strings. If none, return an empty array [].
 
     Return ONLY a valid JSON object with the exact keys: "customer_name", "job_address", "po", "tile_type", "birdstop", "drip_edge", "wood_replacements", "additional_items". 
     Do not include any markdown wrappers like backticks or regular prose.
@@ -343,55 +343,13 @@ with right_panel:
         except Exception as err: st.caption("Rendering visual reference layout frame...")
     else: st.info("💡 Drop your PDF files into the uploader matrix above to unlock the scrollable window for this document.")
 
-# 📋 BOTTOM ROW: DRAFT ORDER TABLE ENGINE & CRM PUSH
+# 📋 BOTTOM ROW: DRAFT ORDER TABLE ENGINE
 st.markdown("---")
 st.header("2. Calculated Material Order Manifest")
 manifest_ready = (material_type == "Mod Bit" and (mod_sq > 0 or (mod_eaves + mod_rakes) > 0)) or (material_type != "Mod Bit" and sq_count > 0)
 
 if manifest_ready:
     st.table({"Material Item Description": descriptions, "Calculated Quantity": quantities})
-    
-    # --- 🚀 CRM WEBHOOK INTEGRATION ---
-    st.markdown("---")
-    st.header("3. Push Order to CRM / Supplier")
-    st.write("Send this material order and contract data directly to your CRM, Zapier, or Make.com.")
-    
-    webhook_url = st.text_input("Webhook URL (e.g., Zapier, Make.com, or CRM API link)", placeholder="https://hooks.zapier.com/hooks/catch/...")
-    
-    if st.button("🚀 Push Order Data"):
-        if not webhook_url:
-            st.error("⚠️ Please enter a valid Webhook URL.")
-        else:
-            # Construct the clean JSON payload
-            payload = {
-                "job_info": {
-                    "po_number": final_po,
-                    "customer_name": final_cust_name,
-                    "job_address": final_address,
-                    "material_type": material_type,
-                    "job_type": job_type if material_type == "Tile" else "N/A"
-                },
-                "selections": {
-                    "product": final_tile,
-                    "birdstop": final_birdstop,
-                    "drip_edge": final_drip
-                },
-                "additional_scope": {
-                    "wood_replacements": wood_replacements,
-                    "other_items": additional_items
-                },
-                "material_manifest": [{"item": d, "quantity": q} for d, q in zip(descriptions, quantities)]
-            }
-            
-            with st.spinner("Pushing to CRM..."):
-                try:
-                    response = requests.post(webhook_url, json=payload, timeout=10)
-                    if response.status_code in [200, 201, 202]:
-                        st.success("✅ Order data successfully pushed to your Webhook!")
-                    else:
-                        st.error(f"Failed to push. Server responded with Status Code: {response.status_code}")
-                except Exception as e:
-                    st.error(f"Failed to send request. Error: {e}")
-
 else: 
     st.info("💡 Drop a takeoff report into the hub at the top of the page to populate the order manifests.")
+        
