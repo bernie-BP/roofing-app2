@@ -352,4 +352,4 @@ if manifest_ready:
     st.table({"Material Item Description": descriptions, "Calculated Quantity": quantities})
 else: 
     st.info("💡 Drop a takeoff report into the hub at the top of the page to populate the order manifests.")
-        
+    
