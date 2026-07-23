@@ -49,26 +49,28 @@ def cached_pdf_to_html_viewport(target_bytes, label_tag):
 def ask_ai_to_extract_contract_metadata(contract_bytes):
     if not GEMINI_KEY:
         st.error("⚠️ GEMINI_API_KEY is missing from Streamlit secrets.")
-        return {"po": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field", "wood_replacements": [], "additional_items": []}
+        return {"po": "", "customer_name": "", "job_address": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field", "wood_replacements": [], "additional_items": []}
     
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     headers = {"Content-Type": "application/json"}
     
     pdf_b64 = base64.b64encode(contract_bytes).decode("utf-8")
     
-    # 🔥 Highly aggressive prompt specifically targeting wood layouts and abbreviations
+    # 🔥 Added Customer Name and Job Address to the prompt
     prompt = """
     You are a professional roofing production assistant. Analyze this signed homeowner contract document and extract the construction selections accurately. 
     Review every page of the document carefully. Look for checked boxes, typed text, handwritten notes, and line-item tables.
     
-    1. Customer Name or Job Reference Name (To be used as the PO Number).
-    2. Specific Tile Profile, Brand, or Shingle Style chosen (e.g., Eagle Flat, Westlake S-Profile, GAF HDZ).
-    3. Birdstop Color specified. Look for the section titled "My product Color selections" or similar. If none is specified, return exactly "Blank Field".
-    4. Drip Edge Color selected. Look for the section titled "My product Color selections" or similar. If none is specified, return exactly "Blank Field".
-    5. Wood Replacements: Scan the ENTIRE contract specifically for WOOD repairs, replacements, or carpentry. Look for terms like "Fascia", "Plywood", "OSB", "CDX", "Decking", "1x2", "2x4", "Barge board", "linear feet", "LF", or "sheets". Look inside pricing tables, scope of work sections, and handwritten notes. Extract every wood-related line item, including quantities if listed (e.g., "Replace 40 LF of 1x6 fascia", "3 sheets of OSB included"). Return as an array of strings. If absolutely none are found, return an empty array [].
-    6. Additional items: Any other special instructions, non-wood repairs, or non-wood items mentioned (e.g., dead valley tie-ins, skylight replacements, stucco repair). List these as an array of strings. If none, return an empty array [].
+    1. Customer Name (e.g., John Doe).
+    2. Job Address or Project Address. Look for the physical address where the work will be performed.
+    3. Job Reference Name or PO Number (If different from the customer name).
+    4. Specific Tile Profile, Brand, or Shingle Style chosen (e.g., Eagle Flat, Westlake S-Profile, GAF HDZ).
+    5. Birdstop Color specified. Look for the section titled "My product Color selections" or similar. If none is specified, return exactly "Blank Field".
+    6. Drip Edge Color selected. Look for the section titled "My product Color selections" or similar. If none is specified, return exactly "Blank Field".
+    7. Wood Replacements: Scan the ENTIRE contract specifically for WOOD repairs, replacements, or carpentry. Look for terms like "Fascia", "Plywood", "OSB", "CDX", "Decking", "1x2", "2x4", "Barge board", "linear feet", "LF", or "sheets". Extract every wood-related line item. Return as an array of strings. If none, return [].
+    8. Additional items: Any other special instructions, non-wood repairs, or non-wood items mentioned. List these as an array of strings. If none, return [].
 
-    Return ONLY a valid JSON object with the exact keys: "po", "tile_type", "birdstop", "drip_edge", "wood_replacements", "additional_items". 
+    Return ONLY a valid JSON object with the exact keys: "customer_name", "job_address", "po", "tile_type", "birdstop", "drip_edge", "wood_replacements", "additional_items". 
     Do not include any markdown wrappers like backticks or regular prose.
     """
     
@@ -99,13 +101,13 @@ def ask_ai_to_extract_contract_metadata(contract_bytes):
             st.error(f"API Error {response.status_code}: {response.text}")
     except Exception as err:
         st.error(f"Metadata extraction AI request failed: {err}")
-    return {"po": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field", "wood_replacements": [], "additional_items": []}
+    return {"po": "", "customer_name": "", "job_address": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field", "wood_replacements": [], "additional_items": []}
 
 # --- 🧠 STATE MANAGEMENT INITIALIZATION ---
 if "scanned_vals" not in st.session_state:
     st.session_state.scanned_vals = {"pitched_sq": "0.0", "flat_sq": "0.0", "eaves": "0.0", "valleys": "0.0", "hips": "0.0", "ridges": "0.0", "rakes": "0.0"}
 if "ai_metadata" not in st.session_state:
-    st.session_state.ai_metadata = {"po": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field", "wood_replacements": [], "additional_items": []}
+    st.session_state.ai_metadata = {"po": "", "customer_name": "", "job_address": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field", "wood_replacements": [], "additional_items": []}
 if "processed_roofr_hash" not in st.session_state:
     st.session_state.processed_roofr_hash = None
 if "processed_contract_hash" not in st.session_state:
@@ -300,9 +302,11 @@ with left_panel:
     
     col_m1, col_m2 = st.columns(2)
     with col_m1:
+        final_cust_name = st.text_input("Customer Name", value=ai_vals.get("customer_name", ""))
+        final_address = st.text_input("Job Address", value=ai_vals.get("job_address", ""))
         final_po = st.text_input("PO Number / Reference", value=ai_vals.get("po", ""))
-        final_tile = st.text_input("Contracted Tile/Product Profile", value=ai_vals.get("tile_type", ""))
     with col_m2:
+        final_tile = st.text_input("Contracted Tile/Product Profile", value=ai_vals.get("tile_type", ""))
         final_birdstop = st.text_input("Birdstop Color Spec", value=ai_vals.get("birdstop", "Blank Field"))
         final_drip = st.text_input("Drip Edge Color Spec", value=ai_vals.get("drip_edge", "Blank Field"))
         
@@ -339,12 +343,55 @@ with right_panel:
         except Exception as err: st.caption("Rendering visual reference layout frame...")
     else: st.info("💡 Drop your PDF files into the uploader matrix above to unlock the scrollable window for this document.")
 
-# 📋 BOTTOM ROW: DRAFT ORDER TABLE ENGINE
+# 📋 BOTTOM ROW: DRAFT ORDER TABLE ENGINE & CRM PUSH
 st.markdown("---")
 st.header("2. Calculated Material Order Manifest")
 manifest_ready = (material_type == "Mod Bit" and (mod_sq > 0 or (mod_eaves + mod_rakes) > 0)) or (material_type != "Mod Bit" and sq_count > 0)
 
 if manifest_ready:
     st.table({"Material Item Description": descriptions, "Calculated Quantity": quantities})
+    
+    # --- 🚀 CRM WEBHOOK INTEGRATION ---
+    st.markdown("---")
+    st.header("3. Push Order to CRM / Supplier")
+    st.write("Send this material order and contract data directly to your CRM, Zapier, or Make.com.")
+    
+    webhook_url = st.text_input("Webhook URL (e.g., Zapier, Make.com, or CRM API link)", placeholder="https://hooks.zapier.com/hooks/catch/...")
+    
+    if st.button("🚀 Push Order Data"):
+        if not webhook_url:
+            st.error("⚠️ Please enter a valid Webhook URL.")
+        else:
+            # Construct the clean JSON payload
+            payload = {
+                "job_info": {
+                    "po_number": final_po,
+                    "customer_name": final_cust_name,
+                    "job_address": final_address,
+                    "material_type": material_type,
+                    "job_type": job_type if material_type == "Tile" else "N/A"
+                },
+                "selections": {
+                    "product": final_tile,
+                    "birdstop": final_birdstop,
+                    "drip_edge": final_drip
+                },
+                "additional_scope": {
+                    "wood_replacements": wood_replacements,
+                    "other_items": additional_items
+                },
+                "material_manifest": [{"item": d, "quantity": q} for d, q in zip(descriptions, quantities)]
+            }
+            
+            with st.spinner("Pushing to CRM..."):
+                try:
+                    response = requests.post(webhook_url, json=payload, timeout=10)
+                    if response.status_code in [200, 201, 202]:
+                        st.success("✅ Order data successfully pushed to your Webhook!")
+                    else:
+                        st.error(f"Failed to push. Server responded with Status Code: {response.status_code}")
+                except Exception as e:
+                    st.error(f"Failed to send request. Error: {e}")
+
 else: 
     st.info("💡 Drop a takeoff report into the hub at the top of the page to populate the order manifests.")
