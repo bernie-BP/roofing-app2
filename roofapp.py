@@ -168,7 +168,7 @@ with left_panel:
     
     # MOVED: Top level layout selections using radio buttons
     material_type = st.radio("Material Type", options=["Tile", "Shingles", "Mod Bit"], horizontal=True)
-    job_type = st.radio("Job Type", options=["New Tile", "Re-Roof"], index=1, horizontal=True) if material_type == "Tile" else None
+    job_type = st.radio("Job Type", options=["Re-Roof", "New Tile"], index=0, horizontal=True) if material_type == "Tile" else None
     
     if material_type != "Mod Bit":
         underlayment_roll_size = st.radio("Underlayment Roll Size", options=[2, 5, 10], format_func=lambda x: f"{x} SQ roll", horizontal=True)
