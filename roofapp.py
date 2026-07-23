@@ -48,19 +48,24 @@ def cached_pdf_to_html_viewport(target_bytes, label_tag):
 
 def ask_ai_to_extract_contract_metadata(contract_text):
     if not GEMINI_KEY:
+        st.error("⚠️ GEMINI_API_KEY is missing from Streamlit secrets.")
+        return {"po": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field"}
+    
+    # If pypdf couldn't read any text, don't bother asking the AI
+    if not contract_text or len(contract_text.strip()) < 20:
+        st.warning("⚠️ No readable text found in the PDF. It might be a scanned image.")
         return {"po": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field"}
     
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     headers = {"Content-Type": "application/json"}
     
-    # Updated Prompt targeting "My product Color selections" specifically 
     prompt = f"""
-    You are a professional roofing production assistant. Analyze the following text extracted from a signed homeowner contract and extract the construction selections accurately. Pay special attention to the section titled "My product Color selections".
+    You are a professional roofing production assistant. Analyze the following text extracted from a signed homeowner contract and extract the construction selections accurately. Pay special attention to the section titled "My product Color selections" or similar wording.
     
     1. Customer Name or Job Reference Name (To be used as the PO Number)
     2. Specific Tile Profile, Brand, or Shingle Style chosen (e.g., Eagle Flat, Westlake S-Profile, GAF HDZ)
-    3. Birdstop Color specified. (Look specifically in the "My product Color selections" section). If there is nothing specified, return exactly "Blank Field".
-    4. Drip Edge Color selected by the customer. (Look specifically in the "My product Color selections" section). If there is nothing specified, return exactly "Blank Field".
+    3. Birdstop Color specified. (Look specifically in the product color selections section). If there is nothing specified, return exactly "Blank Field".
+    4. Drip Edge Color selected by the customer. (Look specifically in the product color selections section). If there is nothing specified, return exactly "Blank Field".
 
     Return ONLY a valid JSON object with the exact keys: "po", "tile_type", "birdstop", "drip_edge". 
     Do not include any markdown wrappers like backticks or regular prose.
@@ -72,13 +77,15 @@ def ask_ai_to_extract_contract_metadata(contract_text):
     payload = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"responseMimeType": "application/json"}}
     
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=12)
+        response = requests.post(url, headers=headers, json=payload, timeout=15)
         if response.status_code == 200:
             res_json = response.json()
             text_response = res_json["candidates"][0]["content"]["parts"][0]["text"]
             return json.loads(text_response)
+        else:
+            st.error(f"API Error {response.status_code}: {response.text}")
     except Exception as err:
-        st.warning(f"Metadata extraction fallback triggered: {err}")
+        st.error(f"Metadata extraction AI request failed: {err}")
     return {"po": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field"}
 
 # --- 🧠 STATE MANAGEMENT INITIALIZATION ---
@@ -90,6 +97,8 @@ if "processed_roofr_hash" not in st.session_state:
     st.session_state.processed_roofr_hash = None
 if "processed_contract_hash" not in st.session_state:
     st.session_state.processed_contract_hash = None
+if "contract_raw_text" not in st.session_state:
+    st.session_state.contract_raw_text = ""
 
 if os.path.exists("logo.png"):
     st.image("logo.png", width=200)
@@ -152,11 +161,21 @@ else:
             try:
                 contract_reader = pypdf.PdfReader(BytesIO(contract_pages_bytes))
                 contract_text = "".join([page.extract_text() for page in contract_reader.pages if page.extract_text()])
+                
+                # Save raw text to session state for debugging
+                st.session_state.contract_raw_text = contract_text 
+
                 with st.spinner("AI is analyzing signed contract..."):
                     st.session_state.ai_metadata = ask_ai_to_extract_contract_metadata(contract_text)
                     st.session_state.processed_contract_hash = current_contract_hash
                     st.success("✅ Signed contract processed!")
             except Exception as e: st.error(f"Error reading contract: {e}")
+
+    # 🛠️ DIAGNOSTIC TOOL: See what the AI sees
+    if st.session_state.contract_raw_text:
+        with st.expander("🛠️ Developer Tool: View Extracted Contract Text"):
+            st.info("This is the exact text the PDF reader was able to pull. If the info you want is missing here, the AI cannot see it.")
+            st.text(st.session_state.contract_raw_text if len(st.session_state.contract_raw_text.strip()) > 0 else "NO TEXT DETECTED - THIS IS LIKELY A SCANNED IMAGE.")
 
 st.markdown("---")
 
@@ -237,13 +256,13 @@ with left_panel:
             field_bundles = math.ceil(total_squares_with_waste * 3)
             hip_ridge_bundles = math.ceil(hip_ridge_lf / 33) if hip_ridge_lf > 0 else 0
             
-            # 1. GAF Pro Start: Eaves + Rakes @ 120 LF per bundle (No waste)
+            # 1. GAF Pro Start
             eaves_and_rakes_lf = eaves + rakes
             pro_start_bundles = math.ceil(eaves_and_rakes_lf / 120) if eaves_and_rakes_lf > 0 else 0
             
-            # 2. GAF WeatherWatch: Valleys + Eaves @ 3ft roll width (2 SQ / 200 sq ft per roll) (No waste)
+            # 2. GAF WeatherWatch
             valleys_and_eaves_lf = valleys + eaves
-            weather_watch_sqft = valleys_and_eaves_lf * 3  # 3ft width coverage
+            weather_watch_sqft = valleys_and_eaves_lf * 3 
             weather_watch_rolls = math.ceil(weather_watch_sqft / 200) if valleys_and_eaves_lf > 0 else 0
             
             field_nail_boxes = math.ceil(sq_count / 20) if sq_count > 0 else 0
@@ -316,3 +335,4 @@ if manifest_ready:
     st.table({"Material Item Description": descriptions, "Calculated Quantity": quantities})
 else: 
     st.info("💡 Drop a takeoff report into the hub at the top of the page to populate the order manifests.")
+    
