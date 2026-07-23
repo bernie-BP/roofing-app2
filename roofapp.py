@@ -48,17 +48,19 @@ def cached_pdf_to_html_viewport(target_bytes, label_tag):
 
 def ask_ai_to_extract_contract_metadata(contract_text):
     if not GEMINI_KEY:
-        return {"po": "", "tile_type": "", "birdstop": "Black", "drip_edge": "White"}
+        return {"po": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field"}
     
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     headers = {"Content-Type": "application/json"}
     
+    # Updated Prompt targeting "My product Color selections" specifically 
     prompt = f"""
-    You are a professional roofing production assistant. Analyze the following text extracted from a signed homeowner contract and extract the construction selections accurately:
+    You are a professional roofing production assistant. Analyze the following text extracted from a signed homeowner contract and extract the construction selections accurately. Pay special attention to the section titled "My product Color selections".
+    
     1. Customer Name or Job Reference Name (To be used as the PO Number)
     2. Specific Tile Profile, Brand, or Shingle Style chosen (e.g., Eagle Flat, Westlake S-Profile, GAF HDZ)
-    3. Birdstop Color specified (e.g., Black, Terracotta, Brown, Grey)
-    4. Drip Edge Color selected by the customer (e.g., White, Bronze, Charcoal, Black)
+    3. Birdstop Color specified. (Look specifically in the "My product Color selections" section). If there is nothing specified, return exactly "Blank Field".
+    4. Drip Edge Color selected by the customer. (Look specifically in the "My product Color selections" section). If there is nothing specified, return exactly "Blank Field".
 
     Return ONLY a valid JSON object with the exact keys: "po", "tile_type", "birdstop", "drip_edge". 
     Do not include any markdown wrappers like backticks or regular prose.
@@ -77,13 +79,13 @@ def ask_ai_to_extract_contract_metadata(contract_text):
             return json.loads(text_response)
     except Exception as err:
         st.warning(f"Metadata extraction fallback triggered: {err}")
-    return {"po": "", "tile_type": "", "birdstop": "Black", "drip_edge": "White"}
+    return {"po": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field"}
 
 # --- 🧠 STATE MANAGEMENT INITIALIZATION ---
 if "scanned_vals" not in st.session_state:
     st.session_state.scanned_vals = {"pitched_sq": "0.0", "flat_sq": "0.0", "eaves": "0.0", "valleys": "0.0", "hips": "0.0", "ridges": "0.0", "rakes": "0.0"}
 if "ai_metadata" not in st.session_state:
-    st.session_state.ai_metadata = {"po": "", "tile_type": "", "birdstop": "Black", "drip_edge": "White"}
+    st.session_state.ai_metadata = {"po": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field"}
 if "processed_roofr_hash" not in st.session_state:
     st.session_state.processed_roofr_hash = None
 if "processed_contract_hash" not in st.session_state:
@@ -166,7 +168,6 @@ left_panel, right_panel = st.columns([1.0, 1.0], gap="large")
 with left_panel:
     st.subheader("🛠️ Production Controls & Layout Settings")
     
-    # MOVED: Top level layout selections using radio buttons
     material_type = st.radio("Material Type", options=["Tile", "Shingles", "Mod Bit"], horizontal=True)
     job_type = st.radio("Job Type", options=["Re-Roof", "New Tile"], index=0, horizontal=True) if material_type == "Tile" else None
     
@@ -286,8 +287,8 @@ with left_panel:
         final_po = st.text_input("PO Number / Reference", value=ai_vals.get("po", ""))
         final_tile = st.text_input("Contracted Tile/Product Profile", value=ai_vals.get("tile_type", ""))
     with col_m2:
-        final_birdstop = st.text_input("Birdstop Color Spec", value=ai_vals.get("birdstop", "Black"))
-        final_drip = st.text_input("Drip Edge Color Spec", value=ai_vals.get("drip_edge", "White"))
+        final_birdstop = st.text_input("Birdstop Color Spec", value=ai_vals.get("birdstop", "Blank Field"))
+        final_drip = st.text_input("Drip Edge Color Spec", value=ai_vals.get("drip_edge", "Blank Field"))
 
 # 🖼️ RIGHT PANEL: SCROLLABLE GRAPHICS VIEWPORT
 with right_panel:
