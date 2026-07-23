@@ -46,16 +46,14 @@ def cached_pdf_to_html_viewport(target_bytes, label_tag):
     html_content += '</div>'
     return html_content
 
-# 🔥 UPGRADED: Now sends the actual PDF file bytes directly to Gemini Vision!
 def ask_ai_to_extract_contract_metadata(contract_bytes):
     if not GEMINI_KEY:
         st.error("⚠️ GEMINI_API_KEY is missing from Streamlit secrets.")
-        return {"po": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field", "additional_items": []}
+        return {"po": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field", "wood_replacements": [], "additional_items": []}
     
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     headers = {"Content-Type": "application/json"}
     
-    # Convert PDF bytes to base64 so Gemini can read the document visually
     pdf_b64 = base64.b64encode(contract_bytes).decode("utf-8")
     
     prompt = """
@@ -66,9 +64,10 @@ def ask_ai_to_extract_contract_metadata(contract_bytes):
     2. Specific Tile Profile, Brand, or Shingle Style chosen (e.g., Eagle Flat, Westlake S-Profile, GAF HDZ).
     3. Birdstop Color specified. Look for the section titled "My product Color selections" or similar. If none is specified, return exactly "Blank Field".
     4. Drip Edge Color selected. Look for the section titled "My product Color selections" or similar. If none is specified, return exactly "Blank Field".
-    5. Additional items, repairs, or special instructions mentioned in the contract (e.g., Wood replacements, dead valley tie-ins, fascia repairs, skylight replacements). List these as an array of strings. If none, return an empty array [].
+    5. Wood Replacements: Search the contract for any mention of wood replacement, wood repairs, fascia board replacement, plywood decking repairs, etc. List every wood-related item as an array of strings. If none, return an empty array [].
+    6. Additional items: Any other special instructions, non-wood repairs, or non-wood items mentioned (e.g., dead valley tie-ins, skylight replacements). List these as an array of strings. If none, return an empty array [].
 
-    Return ONLY a valid JSON object with the exact keys: "po", "tile_type", "birdstop", "drip_edge", "additional_items". 
+    Return ONLY a valid JSON object with the exact keys: "po", "tile_type", "birdstop", "drip_edge", "wood_replacements", "additional_items". 
     Do not include any markdown wrappers like backticks or regular prose.
     """
     
@@ -90,7 +89,6 @@ def ask_ai_to_extract_contract_metadata(contract_bytes):
     }
     
     try:
-        # Increased timeout to 30s since analyzing a full PDF takes a bit longer
         response = requests.post(url, headers=headers, json=payload, timeout=30)
         if response.status_code == 200:
             res_json = response.json()
@@ -100,13 +98,13 @@ def ask_ai_to_extract_contract_metadata(contract_bytes):
             st.error(f"API Error {response.status_code}: {response.text}")
     except Exception as err:
         st.error(f"Metadata extraction AI request failed: {err}")
-    return {"po": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field", "additional_items": []}
+    return {"po": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field", "wood_replacements": [], "additional_items": []}
 
 # --- 🧠 STATE MANAGEMENT INITIALIZATION ---
 if "scanned_vals" not in st.session_state:
     st.session_state.scanned_vals = {"pitched_sq": "0.0", "flat_sq": "0.0", "eaves": "0.0", "valleys": "0.0", "hips": "0.0", "ridges": "0.0", "rakes": "0.0"}
 if "ai_metadata" not in st.session_state:
-    st.session_state.ai_metadata = {"po": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field", "additional_items": []}
+    st.session_state.ai_metadata = {"po": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field", "wood_replacements": [], "additional_items": []}
 if "processed_roofr_hash" not in st.session_state:
     st.session_state.processed_roofr_hash = None
 if "processed_contract_hash" not in st.session_state:
@@ -171,7 +169,6 @@ else:
         current_contract_hash = f"{uploaded_contract.name}_{len(contract_pages_bytes)}"
         if st.session_state.processed_contract_hash != current_contract_hash:
             with st.spinner("AI is analyzing the entire signed contract visually..."):
-                # 🔥 We now pass the RAW PDF BYTES to Gemini!
                 st.session_state.ai_metadata = ask_ai_to_extract_contract_metadata(contract_pages_bytes)
                 st.session_state.processed_contract_hash = current_contract_hash
                 st.success("✅ Signed contract processed!")
@@ -308,13 +305,21 @@ with left_panel:
         final_birdstop = st.text_input("Birdstop Color Spec", value=ai_vals.get("birdstop", "Blank Field"))
         final_drip = st.text_input("Drip Edge Color Spec", value=ai_vals.get("drip_edge", "Blank Field"))
         
-    st.markdown("#### 🪵 Additional Contract Items")
+    st.markdown("#### 🪵 Wood Replacements")
+    wood_replacements = ai_vals.get("wood_replacements", [])
+    if wood_replacements and isinstance(wood_replacements, list):
+        for item in wood_replacements:
+            st.markdown(f"- {item}")
+    else:
+        st.info("No wood replacement items found in the contract.")
+
+    st.markdown("#### 🛠️ Additional Contract Items")
     additional_items = ai_vals.get("additional_items", [])
     if additional_items and isinstance(additional_items, list):
         for item in additional_items:
             st.markdown(f"- {item}")
     else:
-        st.info("No additional items or wood replacement notes found in the contract.")
+        st.info("No additional items or special instructions found in the contract.")
 
 # 🖼️ RIGHT PANEL: SCROLLABLE GRAPHICS VIEWPORT
 with right_panel:
