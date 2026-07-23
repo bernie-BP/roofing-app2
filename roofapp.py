@@ -56,7 +56,6 @@ def ask_ai_to_extract_contract_metadata(contract_bytes):
     
     pdf_b64 = base64.b64encode(contract_bytes).decode("utf-8")
     
-    # 🔥 Highly aggressive prompt specifically targeting wood layouts and abbreviations
     prompt = """
     You are a professional roofing production assistant. Analyze this signed homeowner contract document and extract the construction selections accurately. 
     Review every page of the document carefully. Look for checked boxes, typed text, handwritten notes, and line-item tables.
@@ -207,13 +206,20 @@ with left_panel:
         
         if mod_bit_base_type == "Base Sheet (2 SQ per roll)":
             base_rolls = math.ceil(mod_sq / 2) if mod_sq > 0 else 0
-            base_description, base_quantity_str = "Polyglass Base Sheet", f"{base_rolls}"
+            base_description = "Polyglass Base Sheet"
+            base_coverage = "2 SQ (200 sq ft) roll"
+            base_formula = "RoundUp(SQ / 2)"
         else:
             base_rolls = math.ceil((mod_eaves + mod_rakes) / 66) if (mod_eaves + mod_rakes) > 0 else 0
-            base_description, base_quantity_str = 'Polyglass SAV 9" Self-Adhered', f"{base_rolls}"
+            base_description = 'Polyglass SAV 9" Self-Adhered'
+            base_coverage = "66ft roll"
+            base_formula = "RoundUp((Eaves + Rakes) / 66)"
             
-        descriptions = [f"Polyglass Cap Sheet — {cap_color}", base_description, "Drip Edge (10ft)"]
+        descriptions = [f"Polyglass Cap Sheet — {cap_color}", base_description, "Drip Edge"]
+        coverages = ["1 SQ roll", base_coverage, "10ft pieces"]
+        formulas = ["RoundUp(SQ)", base_formula, "RoundUp(Eaves / 10) + 2"]
         quantities = [f"{cap_rolls}", f"{base_rolls}", f"{mb_drip_pieces}"]
+        
     else:
         sub_col1, sub_col2 = st.columns(2)
         with sub_col1:
@@ -245,9 +251,17 @@ with left_panel:
             ridge_bundles = math.ceil(hip_ridge_lf / 100) if is_flat_tile else math.ceil(ridges / 50)
             
             hip_ridge_desc = ["Hip Closures", "Ridge Closures"] if not is_flat_tile else ["Hip & Ridge Closures"]
+            hip_ridge_cov = ["25ft per bundle", "50ft per bundle"] if not is_flat_tile else ["100ft per bundle"]
             hip_ridge_qty = [f"{hip_bundles}", f"{ridge_bundles}"] if not is_flat_tile else [f"{ridge_bundles}"]
-            descriptions = [f"Field Tile: {product}", f"Tile Underlayment ({underlayment_roll_size} SQ)", *hip_ridge_desc, "Roof Battens", "Birdstop Pieces", "Drip Edge"]
+            
+            pallet_formula = f"RoundUp((SQ * {WASTE_FACTOR}) / 2.97)" if job_type == "New Tile" else "RoundUp(SQ / 20) to half pallets"
+            hip_ridge_form = ["RoundUp(Hips / 25)", "RoundUp(Ridges / 50)"] if not is_flat_tile else ["RoundUp((Hips + Ridges) / 100)"]
+            
+            descriptions = [f"Field Tile: {product}", "Tile Underlayment", *hip_ridge_desc, "Roof Battens", "Birdstop Pieces", "Drip Edge"]
+            coverages = [f"~2.97 SQ per pallet" if job_type == "New Tile" else "Varies by SQ", f"{underlayment_roll_size} SQ roll", *hip_ridge_cov, "1 SQ per bundle", "10ft pieces", "10ft pieces"]
+            formulas = [pallet_formula, f"RoundUp((SQ * 1.15) / {underlayment_roll_size})", *hip_ridge_form, "RoundUp(SQ)", "RoundUp(Eaves / 10) + 2", "RoundUp(Eaves / 10) + 2"]
             quantities = [f"{pallets_needed:g}", f"{underlayment_rolls}", *hip_ridge_qty, f"{batten_bundles}", f"{birdstop_pieces}", f"{tile_drip_pieces}"]
+            
         else:
             # --- SHINGLE CALCULATIONS ---
             total_squares_with_waste = sq_count * WASTE_FACTOR
@@ -270,14 +284,36 @@ with left_panel:
             
             descriptions = [
                 f"Field Shingles: {product}", 
-                f"Underlayment ({underlayment_roll_size} SQ)", 
-                "GAF WeatherWatch Leak Barrier (2 SQ Roll)",
+                "Underlayment", 
+                "GAF WeatherWatch Leak Barrier",
                 "GAF Pro Start Starter Strip", 
                 "Hip & Ridge Cap", 
                 "Drip Edge Pieces", 
                 "Shingle Field Nails", 
                 "Eave Coil Nails", 
                 "Plastic Cap Nails"
+            ]
+            coverages = [
+                "3 bundles per SQ",
+                f"{underlayment_roll_size} SQ roll",
+                "2 SQ (200 sq ft) roll",
+                "120ft per bundle",
+                "33ft per bundle",
+                "10ft pieces",
+                "~20 SQ per box",
+                "~20 SQ per box",
+                "~20 SQ per box"
+            ]
+            formulas = [
+                f"RoundUp((SQ * {WASTE_FACTOR}) * 3)",
+                f"RoundUp((SQ * 1.15) / {underlayment_roll_size})",
+                "RoundUp(((Valleys + Eaves) * 3) / 200)",
+                "RoundUp((Eaves + Rakes) / 120)",
+                "RoundUp((Hips + Ridges) / 33)",
+                "RoundUp((Eaves + Rakes) / 10) + 2",
+                "RoundUp(SQ / 20)",
+                "RoundUp(SQ / 20)",
+                "RoundUp(SQ / 20)"
             ]
             quantities = [
                 f"{field_bundles}", 
@@ -294,6 +330,8 @@ with left_panel:
     # Valley Flashing (W-Valley) only applies to Tile installations
     if material_type == "Tile" and valleys > 0:
         descriptions.append("Valley Flashing (W-Valley)")
+        coverages.append("10ft pieces")
+        formulas.append("RoundUp(Valleys / 10)")
         quantities.append(f"{valley_pieces}")
 
     st.markdown("---")
@@ -349,7 +387,12 @@ st.header("2. Calculated Material Order Manifest")
 manifest_ready = (material_type == "Mod Bit" and (mod_sq > 0 or (mod_eaves + mod_rakes) > 0)) or (material_type != "Mod Bit" and sq_count > 0)
 
 if manifest_ready:
-    st.table({"Material Item Description": descriptions, "Calculated Quantity": quantities})
+    st.table({
+        "Material Item Description": descriptions, 
+        "Coverage / Specs": coverages,
+        "Calculation Formula": formulas,
+        "Calculated Quantity": quantities
+    })
 else: 
     st.info("💡 Drop a takeoff report into the hub at the top of the page to populate the order manifests.")
-    
+        
