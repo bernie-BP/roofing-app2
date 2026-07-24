@@ -49,13 +49,14 @@ def cached_pdf_to_html_viewport(target_bytes, label_tag):
 def ask_ai_to_extract_contract_metadata(contract_bytes):
     if not GEMINI_KEY:
         st.error("⚠️ GEMINI_API_KEY is missing from Streamlit secrets.")
-        return {"po": "", "customer_name": "", "job_address": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field", "wood_replacements": [], "additional_items": []}
+        return {"po": "", "customer_name": "", "job_address": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field", "wood_replacements": [], "additional_items": [], "red_flags": []}
     
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     headers = {"Content-Type": "application/json"}
     
     pdf_b64 = base64.b64encode(contract_bytes).decode("utf-8")
     
+    # 🔥 Added "Red Flags" to the AI Brain
     prompt = """
     You are a professional roofing production assistant. Analyze this signed homeowner contract document and extract the construction selections accurately. 
     Review every page of the document carefully. Look for checked boxes, typed text, handwritten notes, and line-item tables.
@@ -66,10 +67,11 @@ def ask_ai_to_extract_contract_metadata(contract_bytes):
     4. Specific Tile Profile, Brand, or Shingle Style chosen (e.g., Eagle Flat, Westlake S-Profile, GAF HDZ).
     5. Birdstop Color specified. Look for the section titled "My product Color selections" or similar. If none is specified, return exactly "Blank Field".
     6. Drip Edge Color selected. Look for the section titled "My product Color selections" or similar. If none is specified, return exactly "Blank Field".
-    7. Wood Replacements: Scan the ENTIRE contract specifically for WOOD repairs, replacements, or carpentry. Look for terms like "Fascia", "Plywood", "OSB", "CDX", "Decking", "1x2", "2x4", "Barge board", "linear feet", "LF", or "sheets". Look inside pricing tables, scope of work sections, and handwritten notes. Extract every wood-related line item, including quantities if listed (e.g., "Replace 40 LF of 1x6 fascia", "3 sheets of OSB included"). Return as an array of strings. If absolutely none are found, return an empty array [].
-    8. Additional items: Any other special instructions, non-wood repairs, or non-wood items mentioned (e.g., dead valley tie-ins, skylight replacements, stucco repair). List these as an array of strings. If none, return an empty array [].
+    7. Wood Replacements: Scan the ENTIRE contract specifically for WOOD repairs, replacements, or carpentry. Extract every wood-related line item. Return as an array of strings. If none, return [].
+    8. Additional items: Any other special instructions, non-wood repairs, or non-wood items mentioned. List these as an array of strings. If none, return [].
+    9. Red Flags & Gotchas: Act as a strict auditor. Look for anything that could cause production issues. Are there missing signatures? Did the sales rep write in unusual promises (e.g., "customer wants satellite moved", "paint exterior trim")? Are color selections completely missing/blank? List any warnings as an array of strings. If the contract is perfect, return [].
 
-    Return ONLY a valid JSON object with the exact keys: "customer_name", "job_address", "po", "tile_type", "birdstop", "drip_edge", "wood_replacements", "additional_items". 
+    Return ONLY a valid JSON object with the exact keys: "customer_name", "job_address", "po", "tile_type", "birdstop", "drip_edge", "wood_replacements", "additional_items", "red_flags". 
     Do not include any markdown wrappers like backticks or regular prose.
     """
     
@@ -100,13 +102,13 @@ def ask_ai_to_extract_contract_metadata(contract_bytes):
             st.error(f"API Error {response.status_code}: {response.text}")
     except Exception as err:
         st.error(f"Metadata extraction AI request failed: {err}")
-    return {"po": "", "customer_name": "", "job_address": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field", "wood_replacements": [], "additional_items": []}
+    return {"po": "", "customer_name": "", "job_address": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field", "wood_replacements": [], "additional_items": [], "red_flags": []}
 
 # --- 🧠 STATE MANAGEMENT INITIALIZATION ---
 if "scanned_vals" not in st.session_state:
     st.session_state.scanned_vals = {"pitched_sq": "0.0", "flat_sq": "0.0", "eaves": "0.0", "valleys": "0.0", "hips": "0.0", "ridges": "0.0", "rakes": "0.0"}
 if "ai_metadata" not in st.session_state:
-    st.session_state.ai_metadata = {"po": "", "customer_name": "", "job_address": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field", "wood_replacements": [], "additional_items": []}
+    st.session_state.ai_metadata = {"po": "", "customer_name": "", "job_address": "", "tile_type": "", "birdstop": "Blank Field", "drip_edge": "Blank Field", "wood_replacements": [], "additional_items": [], "red_flags": []}
 if "processed_roofr_hash" not in st.session_state:
     st.session_state.processed_roofr_hash = None
 if "processed_contract_hash" not in st.session_state:
@@ -190,7 +192,6 @@ with left_panel:
     
     if material_type != "Mod Bit":
         underlayment_roll_size = st.radio("Underlayment Roll Size", options=[2, 5, 10], format_func=lambda x: f"{x} SQ roll", horizontal=True)
-        # 🔥 Set Tamko Starter as the default by setting index=1
         if material_type == "Shingles":
             starter_type = st.radio("Starter Strip Type", options=["GAF Pro Start", "Tamko Starter"], index=1, horizontal=True)
             
@@ -231,6 +232,10 @@ with left_panel:
         formulas = [f"RoundUp(SQ * {wf_str})", base_formula, f"RoundUp((Eaves * {wf_str}) / 10) + 2"]
         quantities = [f"{cap_rolls}", f"{base_rolls}", f"{mb_drip_pieces}"]
         
+        # Mod bit labor estimates
+        labor_hours_per_sq = 1.8
+        total_man_hours = math.ceil((mod_sq * WASTE_FACTOR) * labor_hours_per_sq)
+        
     else:
         sub_col1, sub_col2 = st.columns(2)
         with sub_col1:
@@ -249,7 +254,6 @@ with left_panel:
         wf_str = f"{WASTE_FACTOR:g}"
         hip_ridge_lf = hips + ridges
         
-        # Globally applying waste
         underlayment_rolls = math.ceil((sq_count * WASTE_FACTOR) / underlayment_roll_size)
         valley_pieces = math.ceil((valleys * WASTE_FACTOR) / 10) if valleys > 0 else 0
         
@@ -277,21 +281,23 @@ with left_panel:
             formulas = [pallet_formula, f"RoundUp((SQ * {wf_str}) / {underlayment_roll_size})", *hip_ridge_form, f"RoundUp(SQ * {wf_str})", f"RoundUp((Eaves * {wf_str}) / 10) + 2", f"RoundUp((Eaves * {wf_str}) / 10) + 2"]
             quantities = [f"{pallets_needed:g}", f"{underlayment_rolls}", *hip_ridge_qty, f"{batten_bundles}", f"{birdstop_pieces}", f"{tile_drip_pieces}"]
             
+            # Tile labor estimates (Heavier, takes longer)
+            labor_hours_per_sq = 2.2 if job_type == "Re-Roof" else 1.6
+            total_man_hours = math.ceil((sq_count * WASTE_FACTOR) * labor_hours_per_sq)
+            
         else:
-            # --- SHINGLE CALCULATIONS (Waste universally applied) ---
+            # --- SHINGLE CALCULATIONS ---
             total_squares_with_waste = sq_count * WASTE_FACTOR
             shingle_drip_pieces = (math.ceil(((eaves + rakes) * WASTE_FACTOR) / drip_edge_length) if (eaves + rakes) > 0 else 0) + 2
             field_bundles = math.ceil(total_squares_with_waste * 3)
             hip_ridge_bundles = math.ceil((hip_ridge_lf * WASTE_FACTOR) / 33) if hip_ridge_lf > 0 else 0
             
-            # 1. Dynamic Starter Strip (GAF vs Tamko)
             starter_coverage_lf = 120 if starter_type == "GAF Pro Start" else 102
             starter_name = f"{starter_type} Starter Strip"
             
             eaves_and_rakes_lf = (eaves + rakes) * WASTE_FACTOR
             starter_bundles = math.ceil(eaves_and_rakes_lf / starter_coverage_lf) if eaves_and_rakes_lf > 0 else 0
             
-            # 2. GAF WeatherWatch
             valleys_and_eaves_lf = (valleys + eaves) * WASTE_FACTOR
             weather_watch_sqft = valleys_and_eaves_lf * 3 
             weather_watch_rolls = math.ceil(weather_watch_sqft / 200) if valleys_and_eaves_lf > 0 else 0
@@ -344,6 +350,10 @@ with left_panel:
                 f"{eave_nail_boxes}", 
                 f"{cap_nail_boxes}"
             ]
+            
+            # Shingle labor estimates (Fastest)
+            labor_hours_per_sq = 1.1
+            total_man_hours = math.ceil((sq_count * WASTE_FACTOR) * labor_hours_per_sq)
 
     # Valley Flashing (W-Valley) only applies to Tile installations
     if material_type == "Tile" and valleys > 0:
@@ -353,8 +363,18 @@ with left_panel:
         quantities.append(f"{valley_pieces}")
 
     st.markdown("---")
-    st.subheader("📝 Verify Contract Selections")
+    
+    # 🔥 The AI Gotcha Alert Box
     ai_vals = st.session_state.ai_metadata
+    red_flags = ai_vals.get("red_flags", [])
+    
+    if red_flags and isinstance(red_flags, list):
+        st.error("🚨 **AI Contract Audit: RED FLAGS DETECTED**")
+        for flag in red_flags:
+            st.markdown(f"**— {flag}**")
+        st.markdown("---")
+        
+    st.subheader("📝 Verify Contract Selections")
     
     col_m1, col_m2 = st.columns(2)
     with col_m1:
@@ -411,6 +431,17 @@ if manifest_ready:
         "Calculation Formula": formulas,
         "Calculated Quantity": quantities
     })
+    
+    # 🔥 New Crew Labor Estimator 
+    st.markdown("---")
+    st.subheader("👷 Labor & Scheduling Estimate")
+    crew_size = 5
+    estimated_days = max(1, round(total_man_hours / (crew_size * 8), 1))
+    
+    col_l1, col_l2, col_l3 = st.columns(3)
+    col_l1.metric("Estimated Total Man-Hours", f"{total_man_hours} hrs")
+    col_l2.metric("Recommended Crew Size", f"{crew_size} roofers")
+    col_l3.metric("Estimated Install Time", f"{estimated_days} Days")
+    
 else: 
     st.info("💡 Drop a takeoff report into the hub at the top of the page to populate the order manifests.")
-    
