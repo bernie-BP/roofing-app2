@@ -190,7 +190,10 @@ with left_panel:
     
     if material_type != "Mod Bit":
         underlayment_roll_size = st.radio("Underlayment Roll Size", options=[2, 5, 10], format_func=lambda x: f"{x} SQ roll", horizontal=True)
-    
+        # 🔥 Added dynamic Starter Strip selector specifically for Shingles
+        if material_type == "Shingles":
+            starter_type = st.radio("Starter Strip Type", options=["GAF Pro Start", "Tamko Starter"], horizontal=True)
+            
     st.markdown("### 📏 Dimensions")
     if material_type == "Mod Bit":
         sub_col1, sub_col2 = st.columns(2)
@@ -281,9 +284,14 @@ with left_panel:
             field_bundles = math.ceil(total_squares_with_waste * 3)
             hip_ridge_bundles = math.ceil((hip_ridge_lf * WASTE_FACTOR) / 33) if hip_ridge_lf > 0 else 0
             
-            eaves_and_rakes_lf = (eaves + rakes) * WASTE_FACTOR
-            pro_start_bundles = math.ceil(eaves_and_rakes_lf / 120) if eaves_and_rakes_lf > 0 else 0
+            # 1. Dynamic Starter Strip (GAF vs Tamko)
+            starter_coverage_lf = 120 if starter_type == "GAF Pro Start" else 102
+            starter_name = f"{starter_type} Starter Strip"
             
+            eaves_and_rakes_lf = (eaves + rakes) * WASTE_FACTOR
+            starter_bundles = math.ceil(eaves_and_rakes_lf / starter_coverage_lf) if eaves_and_rakes_lf > 0 else 0
+            
+            # 2. GAF WeatherWatch
             valleys_and_eaves_lf = (valleys + eaves) * WASTE_FACTOR
             weather_watch_sqft = valleys_and_eaves_lf * 3 
             weather_watch_rolls = math.ceil(weather_watch_sqft / 200) if valleys_and_eaves_lf > 0 else 0
@@ -296,7 +304,7 @@ with left_panel:
                 f"Field Shingles: {product}", 
                 "Underlayment", 
                 "GAF WeatherWatch Leak Barrier",
-                "GAF Pro Start Starter Strip", 
+                starter_name, 
                 "Hip & Ridge Cap", 
                 "Drip Edge Pieces", 
                 "Shingle Field Nails", 
@@ -307,7 +315,7 @@ with left_panel:
                 "3 bundles per SQ",
                 f"{underlayment_roll_size} SQ roll",
                 "2 SQ (200 sq ft) roll",
-                "120ft per bundle",
+                f"{starter_coverage_lf}ft per bundle",
                 "33ft per bundle",
                 "10ft pieces",
                 "~20 SQ per box",
@@ -318,7 +326,7 @@ with left_panel:
                 f"RoundUp((SQ * {wf_str}) * 3)",
                 f"RoundUp((SQ * {wf_str}) / {underlayment_roll_size})",
                 f"RoundUp((((Valleys + Eaves) * {wf_str}) * 3) / 200)",
-                f"RoundUp(((Eaves + Rakes) * {wf_str}) / 120)",
+                f"RoundUp(((Eaves + Rakes) * {wf_str}) / {starter_coverage_lf})",
                 f"RoundUp(((Hips + Ridges) * {wf_str}) / 33)",
                 f"RoundUp(((Eaves + Rakes) * {wf_str}) / 10) + 2",
                 f"RoundUp((SQ * {wf_str}) / 20)",
@@ -329,7 +337,7 @@ with left_panel:
                 f"{field_bundles}", 
                 f"{underlayment_rolls}", 
                 f"{weather_watch_rolls}",
-                f"{pro_start_bundles}", 
+                f"{starter_bundles}", 
                 f"{hip_ridge_bundles}", 
                 f"{shingle_drip_pieces}", 
                 f"{field_nail_boxes}", 
