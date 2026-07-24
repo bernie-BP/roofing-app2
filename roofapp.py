@@ -190,9 +190,9 @@ with left_panel:
     
     if material_type != "Mod Bit":
         underlayment_roll_size = st.radio("Underlayment Roll Size", options=[2, 5, 10], format_func=lambda x: f"{x} SQ roll", horizontal=True)
-        # 🔥 Added dynamic Starter Strip selector specifically for Shingles
+        # 🔥 Set Tamko Starter as the default by setting index=1
         if material_type == "Shingles":
-            starter_type = st.radio("Starter Strip Type", options=["GAF Pro Start", "Tamko Starter"], horizontal=True)
+            starter_type = st.radio("Starter Strip Type", options=["GAF Pro Start", "Tamko Starter"], index=1, horizontal=True)
             
     st.markdown("### 📏 Dimensions")
     if material_type == "Mod Bit":
@@ -413,3 +413,4 @@ if manifest_ready:
     })
 else: 
     st.info("💡 Drop a takeoff report into the hub at the top of the page to populate the order manifests.")
+    
