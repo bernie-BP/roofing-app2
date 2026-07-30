@@ -56,7 +56,6 @@ def ask_ai_to_extract_contract_metadata(contract_bytes):
     
     pdf_b64 = base64.b64encode(contract_bytes).decode("utf-8")
     
-    # 🔥 Added "Red Flags" to the AI Brain
     prompt = """
     You are a professional roofing production assistant. Analyze this signed homeowner contract document and extract the construction selections accurately. 
     Review every page of the document carefully. Look for checked boxes, typed text, handwritten notes, and line-item tables.
@@ -254,6 +253,7 @@ with left_panel:
         wf_str = f"{WASTE_FACTOR:g}"
         hip_ridge_lf = hips + ridges
         
+        # Globally applying waste
         underlayment_rolls = math.ceil((sq_count * WASTE_FACTOR) / underlayment_roll_size)
         valley_pieces = math.ceil((valleys * WASTE_FACTOR) / 10) if valleys > 0 else 0
         
@@ -264,7 +264,9 @@ with left_panel:
             tile_drip_pieces = (math.ceil((eaves * WASTE_FACTOR) / drip_edge_length) if eaves > 0 else 0) + 2
             birdstop_pieces = (math.ceil((eaves * WASTE_FACTOR) / 10) if eaves > 0 else 0) + 2
             is_flat_tile = "Flat" in product
-            batten_bundles = math.ceil(sq_count * WASTE_FACTOR)
+            
+            # 🔥 Removed waste factor from roof battens math
+            batten_bundles = math.ceil(sq_count)
             
             hip_bundles = 0 if is_flat_tile else math.ceil((hips * WASTE_FACTOR) / 25)
             ridge_bundles = math.ceil((hip_ridge_lf * WASTE_FACTOR) / 100) if is_flat_tile else math.ceil((ridges * WASTE_FACTOR) / 50)
@@ -278,7 +280,8 @@ with left_panel:
             
             descriptions = [f"Field Tile: {product}", "Tile Underlayment", *hip_ridge_desc, "Roof Battens", "Birdstop Pieces", "Drip Edge"]
             coverages = [f"~2.97 SQ per pallet" if job_type == "New Tile" else "Varies by SQ", f"{underlayment_roll_size} SQ roll", *hip_ridge_cov, "1 SQ per bundle", "10ft pieces", "10ft pieces"]
-            formulas = [pallet_formula, f"RoundUp((SQ * {wf_str}) / {underlayment_roll_size})", *hip_ridge_form, f"RoundUp(SQ * {wf_str})", f"RoundUp((Eaves * {wf_str}) / 10) + 2", f"RoundUp((Eaves * {wf_str}) / 10) + 2"]
+            # 🔥 Updated formula string for Roof Battens here to just "RoundUp(SQ)"
+            formulas = [pallet_formula, f"RoundUp((SQ * {wf_str}) / {underlayment_roll_size})", *hip_ridge_form, "RoundUp(SQ)", f"RoundUp((Eaves * {wf_str}) / 10) + 2", f"RoundUp((Eaves * {wf_str}) / 10) + 2"]
             quantities = [f"{pallets_needed:g}", f"{underlayment_rolls}", *hip_ridge_qty, f"{batten_bundles}", f"{birdstop_pieces}", f"{tile_drip_pieces}"]
             
             # Tile labor estimates (Heavier, takes longer)
