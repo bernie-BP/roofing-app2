@@ -7,7 +7,7 @@ from io import BytesIO
 
 import requests
 import streamlit as st
-import streamlit.components.v1 as components
+import streamlit.components.v1 as components 
 
 # Handle backend PDF graphic engines safely
 try:
